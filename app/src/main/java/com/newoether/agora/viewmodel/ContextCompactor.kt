@@ -87,6 +87,7 @@ internal fun buildPersistedCompactText(
 
 sealed interface CompactResult {
     data class Created(val messageId: String) : CompactResult
+    data class Stopped(val messageId: String) : CompactResult
     data object NotNeeded : CompactResult
     data class Failed(
         val message: String,

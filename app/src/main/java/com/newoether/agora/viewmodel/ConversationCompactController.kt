@@ -195,13 +195,21 @@ internal class ConversationCompactController(
         val settled = conversations.getMessagesForConversationSnapshot(conversationId)
             .find { it.id == messageId }
             ?: return compactLaunch to CompactResult.Failed("Compact message disappeared")
-        val result = if (settled.status == MessageStatus.SUCCESS) {
-            CompactResult.Created(messageId)
-        } else {
-            CompactResult.Failed(
-                settled.text.takeIf(String::isNotBlank) ?: "Context compact failed",
+        val result = when (settled.status) {
+            MessageStatus.SUCCESS -> CompactResult.Created(messageId)
+            MessageStatus.STOPPED -> CompactResult.Stopped(messageId)
+            MessageStatus.ERROR -> CompactResult.Failed(
+                settled.toUiChatMessage { text -> text }
+                    .segments
+                    .orEmpty()
+                    .lastOrNull { segment ->
+                        segment.type == "error" && segment.content.isNotBlank()
+                    }
+                    ?.content
+                    ?: "Context compact failed",
                 messageId,
             )
+            else -> CompactResult.Failed("Context compact failed", messageId)
         }
         return compactLaunch to result
     }

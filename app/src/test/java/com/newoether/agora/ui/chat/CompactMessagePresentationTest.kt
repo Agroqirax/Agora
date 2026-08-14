@@ -7,7 +7,9 @@ import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ThinkingSegmentDisplayModes
 import com.newoether.agora.ui.chat.bottombar.contextUsageAtCapacity
 import com.newoether.agora.ui.chat.bottombar.contextUsageExceedsCompactThreshold
+import com.newoether.agora.ui.chat.message.ContextCompactPillPresentation
 import com.newoether.agora.ui.chat.message.SegmentSheetBackAction
+import com.newoether.agora.ui.chat.message.contextCompactPillPresentation
 import com.newoether.agora.ui.chat.message.segmentSheetBackAction
 import com.newoether.agora.ui.chat.message.usesExplicitDetailBackHandler
 import com.newoether.agora.ui.chat.message.usesVirtualizedSegmentDetail
@@ -192,6 +194,14 @@ class CompactMessagePresentationTest {
                 isStopping = false,
                 message = assistant,
             ),
+        )
+    }
+
+    @Test
+    fun stoppedCompactUsesDedicatedStoppedPillPresentation() {
+        assertEquals(
+            ContextCompactPillPresentation.STOPPED,
+            contextCompactPillPresentation(MessageStatus.STOPPED),
         )
     }
 

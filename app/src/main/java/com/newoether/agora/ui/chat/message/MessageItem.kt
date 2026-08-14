@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
@@ -50,6 +51,25 @@ import kotlinx.coroutines.flow.StateFlow
 
 private const val CompactStreamingStatusText = "Context compacting..."
 private const val CompactErrorText = "Compact error"
+private const val CompactStoppedText = "Compact stopped"
+
+internal enum class ContextCompactPillPresentation {
+    IN_PROGRESS,
+    SUCCESS,
+    ERROR,
+    STOPPED,
+}
+
+internal fun contextCompactPillPresentation(status: MessageStatus): ContextCompactPillPresentation =
+    when (status) {
+        MessageStatus.SENDING,
+        MessageStatus.THINKING,
+        MessageStatus.TOOL_CALLING,
+        MessageStatus.TRANSCRIBING -> ContextCompactPillPresentation.IN_PROGRESS
+        MessageStatus.ERROR -> ContextCompactPillPresentation.ERROR
+        MessageStatus.STOPPED -> ContextCompactPillPresentation.STOPPED
+        MessageStatus.SUCCESS -> ContextCompactPillPresentation.SUCCESS
+    }
 
 internal fun usesExplicitDetailBackHandler(thinkingSegmentDisplayMode: String): Boolean =
     ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
@@ -125,12 +145,10 @@ internal fun MessageItem(
     var showCompactDetail by remember(message.id) { mutableStateOf(false) }
     val haptics = LocalAgoraHaptics.current
     val motionPolicy = LocalAgoraMotionPolicy.current
-    val compactInProgress = message.isContextCompact() && message.status in setOf(
-        MessageStatus.SENDING,
-        MessageStatus.THINKING,
-        MessageStatus.TOOL_CALLING,
-        MessageStatus.TRANSCRIBING,
-    )
+    val compactPresentation = contextCompactPillPresentation(message.status)
+    val compactInProgress =
+        message.isContextCompact() &&
+            compactPresentation == ContextCompactPillPresentation.IN_PROGRESS
 
     if (showInfoDialog) {
         MessageInfoDialog(
@@ -262,8 +280,7 @@ internal fun MessageItem(
                         contentAlignment = Alignment.Center,
                     ) {
                         ContextCompactPill(
-                            inProgress = compactInProgress,
-                            error = message.status == MessageStatus.ERROR,
+                            presentation = compactPresentation,
                             actionsEnabled = compactActionsEnabled && !compactInProgress,
                             onClick = { showCompactDetail = true },
                             onRecompact = { onRecompact(message.id) },
@@ -410,13 +427,14 @@ internal fun MessageItem(
 
 @Composable
 internal fun ContextCompactPill(
-    inProgress: Boolean = false,
-    error: Boolean = false,
+    presentation: ContextCompactPillPresentation,
     actionsEnabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     onRecompact: () -> Unit = {},
     onDelete: () -> Unit = {},
 ) {
+    val inProgress = presentation == ContextCompactPillPresentation.IN_PROGRESS
+    val error = presentation == ContextCompactPillPresentation.ERROR
     var actionsExpanded by remember { mutableStateOf(false) }
     val pillShape = RoundedCornerShape(100.dp)
     val containerColor by animateColorAsState(
@@ -479,10 +497,12 @@ internal fun ContextCompactPill(
                     )
                 } else {
                     Icon(
-                        imageVector = if (error) {
-                            androidx.compose.material.icons.Icons.Default.Error
-                        } else {
-                            androidx.compose.material.icons.Icons.Default.Compress
+                        imageVector = when (presentation) {
+                            ContextCompactPillPresentation.ERROR ->
+                                androidx.compose.material.icons.Icons.Default.Error
+                            ContextCompactPillPresentation.STOPPED ->
+                                androidx.compose.material.icons.Icons.Default.StopCircle
+                            else -> androidx.compose.material.icons.Icons.Default.Compress
                         },
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
@@ -493,6 +513,7 @@ internal fun ContextCompactPill(
             Text(
                 when {
                     error -> CompactErrorText
+                    presentation == ContextCompactPillPresentation.STOPPED -> CompactStoppedText
                     inProgress -> stringResource(com.newoether.agora.R.string.context_compacting)
                     else -> stringResource(com.newoether.agora.R.string.context_compact)
                 },

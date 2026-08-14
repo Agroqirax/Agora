@@ -448,6 +448,7 @@ internal class MessageGenerationController(
                         onSnackbar(compact.message)
                         return null
                     }
+                    is CompactResult.Stopped -> return null
                     CompactResult.NotNeeded,
                     is CompactResult.Created -> Unit
                 }

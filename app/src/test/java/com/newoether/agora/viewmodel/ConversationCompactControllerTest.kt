@@ -293,6 +293,112 @@ class ConversationCompactControllerTest {
         Unit
     }
 
+    @Test
+    fun stoppedManualCompactReturnsStoppedWithoutExposingGeneratedBody() = runBlocking {
+        val result = manualCompactResult(MessageStatus.STOPPED)
+
+        assertTrue(result is CompactResult.Stopped)
+        assertTrue((result as CompactResult.Stopped).messageId.startsWith("compact_"))
+    }
+
+    @Test
+    fun failedManualCompactReturnsOnlyPersistedErrorSegment() = runBlocking {
+        val result = manualCompactResult(
+            status = MessageStatus.ERROR,
+            errorSegment = "provider failed",
+        )
+
+        assertTrue(result is CompactResult.Failed)
+        assertEquals("provider failed", (result as CompactResult.Failed).message)
+        assertFalse(result.message.contains("full generated compact body"))
+    }
+
+    private suspend fun manualCompactResult(
+        status: MessageStatus,
+        errorSegment: String? = null,
+    ): CompactResult {
+        val conversations = mockk<ConversationRepository>()
+        val operation = FakeCompactOperation()
+        val manager = mockk<GenerationManager>()
+        val launcher = mockk<StandardGenerationContinuationLauncher>()
+        val requestBuilder = mockk<GenerationRequestBuilder>()
+        val state = ConversationGenerationState("conversation")
+        val source = sourceEntity()
+        var compactMessageId: String? = null
+
+        coEvery {
+            conversations.getMessagesForConversationSnapshot("conversation")
+        } answers {
+            val settledId = compactMessageId
+            if (settledId == null) {
+                listOf(source)
+            } else {
+                listOf(
+                    source,
+                    MessageEntity(
+                        id = settledId,
+                        conversationId = "conversation",
+                        parentId = source.id,
+                        text = "full generated compact body",
+                        status = status,
+                        participant = Participant.MODEL,
+                        timestamp = 2L,
+                        modelName = "provider:model",
+                        toolCallJson = errorSegment?.let { error ->
+                            """[{"type":"answer","content":"full generated compact body"},{"type":"error","content":"$error"}]"""
+                        },
+                        runId = "compact-run",
+                        runSequence = 0,
+                    ),
+                )
+            }
+        }
+        coEvery { conversations.restoreBranchSelections("conversation") } returns
+            mapOf(null to source.id)
+        coEvery {
+            requestBuilder.captureAdmissionSnapshot(
+                conversationId = "conversation",
+                runId = any(),
+                modelId = "provider:model",
+            )
+        } returns testGenerationAdmissionSnapshot(
+            conversationId = "conversation",
+            runId = "compact-preflight-run",
+        )
+        coEvery { manager.buildApiPath(any()) } returns GenerationApiPath(
+            messages = listOf(source.toUi()),
+            providerConfig = mockk<ProviderConfig>(),
+        )
+        every { launcher.launch(any(), state) } answers {
+            val request = firstArg<StandardGenerationContinuationRequest>()
+            val messageId = requireNotNull(request.modelMessageId)
+            compactMessageId = messageId
+            StandardGenerationContinuationLaunch(
+                job = Job().apply { complete() },
+                modelMessageId = messageId,
+                started = CompletableDeferred(true),
+            )
+        }
+
+        val result = controller(
+            conversations,
+            operation,
+            requestBuilder,
+            manager,
+            launcher,
+        ).manual(
+            conversationId = "conversation",
+            request = CompactRequest(
+                model = "provider:model",
+                prompt = "compact prompt",
+                retainLogicalMessages = 2,
+            ),
+            state = state,
+        )
+        state.dispose()
+        return result
+    }
+
     private fun controller(
         conversations: ConversationRepository,
         operation: ContextCompactOperation,
