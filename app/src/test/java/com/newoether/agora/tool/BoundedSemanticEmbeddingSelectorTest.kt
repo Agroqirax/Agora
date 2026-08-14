@@ -113,6 +113,31 @@ class BoundedSemanticEmbeddingSelectorTest {
         assertEquals(1, result.maxRetainedCandidates)
     }
 
+    @Test
+    fun largeCorpusDefaultUsesAtMostEightyBoundedPages() = runTest {
+        val totalRows = 20_000L
+        var pageLoads = 0
+        val result = BoundedSemanticEmbeddingSelector().select(
+            queryEmbedding = floatArrayOf(1f, 0f),
+            threshold = -2f,
+            limit = 3,
+        ) { afterId, pageLimit ->
+            pageLoads += 1
+            val count = minOf(pageLimit.toLong(), totalRows - afterId)
+                .coerceAtLeast(0)
+                .toInt()
+            List(count) { offset ->
+                val id = afterId + offset + 1
+                row(id, "message-$id", floatArrayOf(1f, 0f))
+            }
+        }
+
+        assertEquals(20_000, result.scannedRows)
+        assertEquals(3, result.maxRetainedCandidates)
+        assertEquals(listOf(1L, 2L, 3L), result.candidates.map { it.rowId })
+        assertTrue("pageLoads=$pageLoads", pageLoads <= 80)
+    }
+
     private fun row(
         id: Long,
         messageId: String,

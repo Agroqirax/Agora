@@ -24,12 +24,13 @@ page plus the requested top candidates; corpus growth must not translate into An
    bytes, and declared dimension.
 2. The DAO uses stable keyset pagination (id > afterId, ORDER BY id, bounded LIMIT). It never
    materializes the complete model corpus for semantic search.
-3. The selector decodes and scores one page at a time.
+3. The selector scores one page at a time directly from the durable BIG_ENDIAN bytes and does not
+   allocate a decoded FloatArray for every row.
 4. A bounded worst-first top-K heap retains at most the requested result count across all pages.
 5. Only the final bounded message-id set is expanded into complete searchable MessageEntity rows.
 6. The final expansion revalidates search visibility and minimum source length before returning.
 
-Peak application memory is therefore proportional to one configured page, one decoded vector, the
+Peak application memory is therefore proportional to one configured page, the cached query vector, the
 bounded top-K heap, and the final bounded message set. It is not proportional to embedding-row
 count or total cached text.
 

@@ -1,6 +1,5 @@
 package com.newoether.agora.tool
 
-import com.newoether.agora.data.EmbeddingIndexer
 import com.newoether.agora.data.local.EmbeddingSearchRow
 import java.util.PriorityQueue
 
@@ -47,6 +46,7 @@ internal class BoundedSemanticEmbeddingSelector(
             )
         }
 
+        val scorer = DirectEmbeddingCosineScorer(queryEmbedding)
         val worstFirst = compareBy<SemanticEmbeddingCandidate> { it.score }
             .thenByDescending { it.rowId }
         val retained = PriorityQueue(worstFirst)
@@ -78,12 +78,7 @@ internal class BoundedSemanticEmbeddingSelector(
                     skippedInvalidRows += 1
                     return@forEach
                 }
-                val score = runCatching {
-                    EmbeddingIndexer.cosineSimilarity(
-                        queryEmbedding,
-                        EmbeddingIndexer.bytesToFloats(row.embedding),
-                    )
-                }.getOrNull()
+                val score = runCatching { scorer.score(row.embedding) }.getOrNull()
                 if (score == null || !score.isFinite()) {
                     skippedInvalidRows += 1
                     return@forEach
@@ -125,7 +120,36 @@ internal class BoundedSemanticEmbeddingSelector(
         )
     }
 
+    private class DirectEmbeddingCosineScorer(
+        private val query: FloatArray,
+    ) {
+        private val queryMagnitude = run {
+            var norm = 0f
+            query.forEach { value -> norm += value * value }
+            kotlin.math.sqrt(norm)
+        }
+
+        fun score(bytes: ByteArray): Float {
+            require(bytes.size == query.size * Float.SIZE_BYTES)
+            var dot = 0f
+            var normB = 0f
+            query.indices.forEach { index ->
+                val offset = index * Float.SIZE_BYTES
+                val bits =
+                    ((bytes[offset].toInt() and 0xff) shl 24) or
+                        ((bytes[offset + 1].toInt() and 0xff) shl 16) or
+                        ((bytes[offset + 2].toInt() and 0xff) shl 8) or
+                        (bytes[offset + 3].toInt() and 0xff)
+                val valueB = Float.fromBits(bits)
+                dot += query[index] * valueB
+                normB += valueB * valueB
+            }
+            val denominator = queryMagnitude * kotlin.math.sqrt(normB)
+            return if (denominator == 0f) 0f else dot / denominator
+        }
+    }
+
     private companion object {
-        const val DEFAULT_PAGE_SIZE = 64
+        const val DEFAULT_PAGE_SIZE = 256
     }
 }

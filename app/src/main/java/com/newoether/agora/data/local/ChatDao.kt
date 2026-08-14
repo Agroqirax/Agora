@@ -655,9 +655,11 @@ interface ChatDao : ChatAutomationDao, ChatContextCompactDao {
         """
         SELECT e.id, e.messageId, e.embedding, e.dimension
         FROM embeddings e
-        INNER JOIN messages m ON e.messageId = m.id
-        INNER JOIN conversations c ON m.conversationId = c.id
-        WHERE e.modelId = :modelId
+        CROSS JOIN messages m
+        CROSS JOIN conversations c
+        WHERE e.messageId = m.id
+          AND m.conversationId = c.id
+          AND e.modelId = :modelId
           AND e.id > :afterId
           AND c.taskId IS NULL
           AND m.participant IN ('USER', 'MODEL')
