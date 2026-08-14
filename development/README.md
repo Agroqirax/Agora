@@ -68,6 +68,16 @@ changes, bounded persistence, and explicit stale-result rejection.
   object when an existing owner plus a parameter can express the behavior safely.
 - Extract only for a cohesive invariant, a real side-effect/transaction boundary, or multiple
   genuine consumers.
+- This is a mandatory review gate: every proposed abstraction must name which of those three
+  conditions it satisfies, why the existing owner plus parameters is insufficient, and which
+  existing responsibility or duplication the new abstraction removes. Missing evidence blocks the
+  change.
+- "Reuse" does not authorize speculative `Descriptor`, `Capabilities`, `Policy`, `Strategy`,
+  `Adapter`, configuration-wrapper, or pass-through objects. Do not introduce a data object merely
+  to rename, regroup, or shuttle fields already owned safely by an existing object.
+- Prefer a direct protocol-local branch or one additional parameter when it is clearer and has one
+  owner. Generalize only after real shared behavior exists; do not build an object model for
+  hypothetical Providers, transports, models, or future consumers.
 - Do not allow a simple controller/manager to accumulate unrelated admission, context, Provider,
   persistence, and UI responsibilities. Split along ownership boundaries, not arbitrary style.
 - Prefer generic rules driven by durable fields over feature names, message prefixes, or UI
@@ -100,6 +110,7 @@ Never:
 |---|---|
 | Message generation, Run lifecycle, queue, tools, Compact, Regenerate, message actions/status, or Provider context | [message-generation.md](message-generation.md) |
 | Embedding-cache reads, semantic conversation search, RAG ranking, or search eligibility | [semantic-search.md](semantic-search.md) |
+| Generic Web Search providers/settings/tool execution or native provider-hosted web search | [web-search.md](web-search.md) |
 
 Add a module document when a user defines durable behavior for another subsystem. Each module
 document must describe current code ownership, allowed and forbidden responsibilities, concrete

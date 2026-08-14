@@ -114,6 +114,9 @@ A change is invalid if it:
 - uses context boundaries to merge UI generations or choose Regenerate scope;
 - reuses or reactivates a terminal Run for a new send/generation;
 - adds a Compact-specific boundary or generation lifecycle;
+- adds a Provider descriptor, capabilities/policy object, adapter layer, wrapper, interface, or
+  factory without a demonstrated cohesive invariant, real side-effect boundary, or multiple
+  genuine stable consumers and without removing an existing responsibility or duplication;
 - mutates suffix/neighbor messages during same-position replacement;
 - merges actions or status across different Run IDs;
 - treats a non-successful Compact as a context boundary.
@@ -226,6 +229,11 @@ A terminal Compact error remains visible in both locations:
   error bar's `errorContainer` alpha, its icon uses `error`, and its text uses the error bar's
   alpha-adjusted `error`; saturated hard-coded red or a different error token is forbidden.
 
+A stopped Compact is a non-error terminal presentation. Its capsule keeps the same stable bounds,
+shows a stopped icon plus exactly `Compact stopped`, and emits no Snackbar. A failed Compact may
+emit only the persisted ordinary generation error segment; generated answer/summary text is never
+an error channel. Missing error detail uses a fixed short fallback.
+
 Both presentations derive from the ordinary durable message status/error fields. They do not own a
 Compact state machine or infer failure from missing text.
 
@@ -267,6 +275,71 @@ Consecutive origin-Run and Compact-Run suppressions are counted. A single boolea
 the origin release and very fast Compact completion can settle in either order and would otherwise
 consume each other's decision. Failure never clears, drops, duplicates, or reorders queued user
 input; it leaves that input pending for a later explicit user action.
+
+### 8.9 Provider-hosted Responses output and OpenAI-compatible controls
+
+An official OpenAI Provider or a custom Provider selected as OpenAI-compatible, together with
+Responses API enabled, is sufficient to expose both `OpenAI Search` and `Service Tier` in the
+conversation UI. No model-name allowlist, capability-discovery request, local capability registry,
+or extra relay declaration may suppress those controls. This is a positive availability rule; it
+does not redefine any separately supported Service Tier surface outside Responses.
+
+The immutable generation snapshot freezes both choices. When OpenAI Search is enabled, the existing
+OpenAI-compatible Responses request includes the native `web_search` tool. When Service Tier is
+enabled, that same request includes the normalized selected `service_tier` value. The ordinary
+Provider owns request serialization; UI visibility must not create a second request path.
+
+OpenAI Responses reasoning summaries are public summary content, not raw chain-of-thought. When
+thinking is enabled on an official or custom OpenAI-compatible Responses transport, the request opts
+into the most detailed available summary with `reasoning.summary = auto`. Summary text deltas enter
+the ordinary `ThoughtChunk` path and therefore form normal durable thinking segments and thinking
+blocks. Disabling thinking suppresses both the summary request and its presentation.
+
+Provider-hosted tools use display-only stream events. They may create and settle ordinary tool
+segments, but they cannot authorize local execution, enter the tool-effect reducer, or fabricate a
+tool-result continuation round. Provider semantic termination still owns whether the request
+succeeded; Stop and errors use the shared generation settlement.
+
+If the official service, selected model, or compatible relay rejects `web_search`,
+`service_tier`, reasoning summary, or the Responses request itself, that failure is an ordinary
+generation error. Persist the provider's bounded error text and render it through the existing red
+error bar. Do not silently retry without the parameter, fall back to Chat Completions or generic Web
+Search, auto-disable a setting, show the generated response as an error, or use a Snackbar-only or
+parallel error presentation.
+
+### 8.10 Provider reuse and mandatory minimum-abstraction rule
+
+Official endpoints and compatible relays reuse the existing Provider implementation selected by the
+wire protocol. A relay carrying Claude or Gemini models through an OpenAI-compatible wire contract
+uses the OpenAI path; model branding must not select a second lifecycle or an Anthropic/Gemini
+transport. Endpoint, authentication, and proven compatibility differences should remain constructor
+parameters, existing configuration fields, or narrow overrides whenever those mechanisms are
+sufficient.
+
+Provider work must not create a general object model merely to make OpenAI, Anthropic, and Gemini
+look structurally identical. Their request encoding, authentication, stream state machine,
+signature/history replay, and terminal proof may remain direct protocol-local code. Reuse is
+required at the existing generation lifecycle, semantic `StreamEvent`, message/tool projection, and
+proven shared utility boundaries; wire-level uniformity is not a goal.
+
+The following are binding review blockers:
+
+- Do not add `ProviderDescriptor`, `ProviderCapabilities`, transport/policy/strategy objects,
+  adapter layers, wrapper configs, factories, or interfaces by default. A proposed name or diagram
+  is not evidence that an abstraction is needed.
+- Do not move existing booleans or fields into a new data object merely to make the configuration
+  appear cleaner. One owner and one consumer should normally remain a direct field, parameter, or
+  protocol-local condition.
+- A new object or interface is allowed only when the task record and review identify a cohesive
+  invariant it owns, a real external/transactional side-effect boundary it isolates, or multiple
+  genuine stable consumers. They must also state why the existing owner plus parameters is unsafe or
+  insufficient and which existing responsibility or duplication will be removed.
+- A refactor that only adds indirection, pass-through calls, mirrored types, mapping layers, or
+  speculative extension points is invalid. Net object growth requires an explicit reduction in
+  ownership ambiguity, duplicated behavior, or failure surface.
+- Capability handling should stay as the smallest direct check in the owning Provider/configuration
+  path until several real features need the exact same rule. Unknown relay behavior fails closed;
+  that alone does not justify a capability framework.
 
 ## 9. Context assembly contract in module terms
 
@@ -356,5 +429,6 @@ reachable safe prefix. It must never jump to a Compact on another branch.
 | Delete isolation | Target-only delete, direct-child reparent, unchanged surviving rows, independent Run presentation. |
 | Priority | Only Compact SUCCESS permits handoff; then pending and already-claimed queue guidance beat loop and the no-guidance path admits loop once. ERROR/STOPPED/cancellation/anomaly starts neither. |
 | Request terminal role | Compact dispatch appends one non-durable initial USER invocation after an Assistant or tool-result parent; provider-visible input ends USER and fixed token accounting includes it. |
+| Responses-compatible output | Official and custom OpenAI-compatible Providers with Responses enabled show OpenAI Search and Service Tier; the real request serializes enabled `web_search`, selected `service_tier`, and thinking summaries; rejection renders the ordinary error bar; hosted tool added/done events settle one display-only tool block and never enter local execution. |
 | Races and failures | Stop before/after bind, consecutive origin/Compact release suppressions in both settlement orders, selection drift, missing target/status, transaction rollback, stale callbacks, checkpoint-versus-terminal ordering, and queue claim failure. |
 | UI stability | Compact row/pill vertical bounds do not change across progress and terminal content; entrance is draw-only and does not alter apparent vertical spacing; error colors match the shared error bar theme tokens and alpha. |
