@@ -1,25 +1,77 @@
 package com.newoether.agora
 
 import android.app.Application
+import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.di.AppContainer
 import com.newoether.agora.util.CrashReporter
+import com.newoether.agora.util.DebugLog
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Application entry point. Installs the crash reporter before any other component runs so
  * that crashes occurring during startup are captured as well.
  *
- * Owns the process-scoped [AppContainer] so that shared singletons (data layer, providers,
- * generation infrastructure) outlive any single Activity/ViewModel and are reachable from
- * background components (Workers, scheduled task execution) — not just the UI.
+ * Owns the process-scoped AppContainer, but publishes it only after the durable database has
+ * passed compatibility checks, supported migrations, and Room schema validation.
  */
 class AgoraApplication : Application() {
-    /** Process-lifetime dependency container. The single source of shared singletons. */
-    val container: AppContainer by lazy { AppContainer(this) }
+    private val startupScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val startupGate = DatabaseStartupGate(
+        inspectDatabase = {
+            withContext(Dispatchers.IO) {
+                ChatDatabase.inspectCompatibility(this@AgoraApplication)
+            }
+        },
+        openResource = {
+            withContext(Dispatchers.IO) {
+                val database = ChatDatabase.build(this@AgoraApplication)
+                AppContainer(this@AgoraApplication, database)
+            }
+        },
+        closeResource = { container -> container.database.close() },
+        deleteDatabase = {
+            withContext(Dispatchers.IO) {
+                val databasePath = getDatabasePath(ChatDatabase.DB_NAME)
+                !databasePath.exists() ||
+                    this@AgoraApplication.deleteDatabase(ChatDatabase.DB_NAME)
+            }
+        },
+        startProcessServices = AppContainer::startProcessServices,
+        reportFailure = { error ->
+            DebugLog.e(
+                "AgoraApplication",
+                "Database startup gate failed closed",
+                error,
+            )
+        },
+    )
+
+    val databaseStartupState: StateFlow<DatabaseStartupState>
+        get() = startupGate.state
 
     override fun onCreate() {
         super.onCreate()
         CrashReporter.install(this)
-        // Orphaned Run recovery is the startup barrier for every generator and scheduler.
-        container.startProcessServices()
+        startupScope.launch {
+            startupGate.initialize()
+        }
     }
+
+    suspend fun awaitDatabaseStartup(): DatabaseStartupState =
+        startupGate.awaitState()
+
+    suspend fun awaitContainer(): AppContainer? =
+        startupGate.awaitReadyResource()
+
+    fun requireContainer(): AppContainer =
+        startupGate.requireReadyResource()
+
+    suspend fun clearIncompatibleDatabase(): Boolean =
+        startupGate.clearBlockedDatabase()
 }

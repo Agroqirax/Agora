@@ -28,7 +28,9 @@ class LoopWorker(
 
         return try {
             setForeground(AutomationForegroundInfo.forLoop(applicationContext, conversationId, id))
-            val container = (applicationContext as AgoraApplication).container
+            val container = (applicationContext as AgoraApplication)
+                .awaitContainer()
+                ?: return Result.failure(workDataOf(KEY_ERROR to "Database unavailable"))
             // A model-level Failure is a completed attempt: LoopManager counts it and schedules
             // the next cycle. Retrying it here could append a duplicate turn to the conversation.
             when (val outcome = container.loopManager.executeByConversationId(conversationId, scheduledAt)) {
@@ -53,7 +55,8 @@ class LoopWorker(
                 Result.retry()
             } else {
                 runCatching {
-                    val container = (applicationContext as AgoraApplication).container
+                    val container = (applicationContext as AgoraApplication).awaitContainer()
+                        ?: return@runCatching
                     container.loopManager.deferAfterInfrastructureFailure(conversationId)
                 }.onFailure { repairError ->
                     DebugLog.e("LoopWorker", "Failed to defer loop=$conversationId", repairError)

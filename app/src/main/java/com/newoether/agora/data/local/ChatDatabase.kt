@@ -165,27 +165,49 @@ abstract class ChatDatabase : RoomDatabase() {
             MIGRATION_21_22,
         )
 
-        fun getStoredVersion(context: Context): Int {
+        fun inspectCompatibility(context: Context): DatabaseCompatibility {
             val dbPath = context.getDatabasePath(DB_NAME)
-            if (!dbPath.exists()) return 0
-            return try {
-                val db = SQLiteDatabase.openDatabase(dbPath.path, null, SQLiteDatabase.OPEN_READONLY)
-                val version = db.version
-                db.close()
-                version
-            } catch (e: Exception) {
-                0
+            return classifyDatabaseCompatibility(
+                databaseExists = dbPath.exists(),
+                currentVersion = CURRENT_VERSION,
+            ) {
+                SQLiteDatabase.openDatabase(
+                    dbPath.path,
+                    null,
+                    SQLiteDatabase.OPEN_READONLY,
+                ).use { database -> database.version }
             }
         }
 
+        /**
+         * Builds and validates the database without any destructive fallback.
+         *
+         * The compatibility check is repeated here as a defense-in-depth boundary for
+         * Workers or future callers that do not enter through AgoraApplication.
+         */
         fun build(context: Context): ChatDatabase {
-            return Room.databaseBuilder(
+            val compatibility = inspectCompatibility(context)
+            check(compatibility.canOpen) {
+                "Refusing to open incompatible Agora database: " +
+                    compatibility.javaClass.simpleName
+            }
+
+            val database = Room.databaseBuilder(
                 context.applicationContext,
                 ChatDatabase::class.java,
-                DB_NAME
+                DB_NAME,
             ).addMigrations(*ALL_MIGRATIONS.toTypedArray())
-                .fallbackToDestructiveMigration(false)
                 .build()
+
+            return try {
+                // Force Room to run supported migrations and schema validation before the
+                // process container or normal UI is published as Ready.
+                database.openHelper.writableDatabase
+                database
+            } catch (error: Exception) {
+                database.close()
+                throw error
+            }
         }
     }
 }

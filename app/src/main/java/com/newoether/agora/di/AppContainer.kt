@@ -33,15 +33,18 @@ import kotlinx.coroutines.launch
 /**
  * Centralized dependency container (manual DI).
  *
- * Replaces the ad-hoc dependency creation previously spread across
- * MainActivity (ChatDatabase.build, ChatViewModelFactory instantiation).
- * All shared dependencies are created once and reused.
+ * Replaces the ad-hoc dependency creation previously spread across MainActivity.
+ * The validated database is injected by AgoraApplication's startup gate; all shared
+ * dependencies are then created once and reused.
  *
  * This is a stepping stone toward a full DI framework (Hilt/Koin);
  * for a single-module project it provides sufficient decoupling and
  * testability without annotation processing overhead.
  */
-class AppContainer(private val appContext: Context) {
+class AppContainer(
+    private val appContext: Context,
+    val database: ChatDatabase,
+) {
     private val application = appContext.applicationContext as Application
 
     /** App-lifetime scope that backs the shared settings StateFlows.
@@ -59,7 +62,6 @@ class AppContainer(private val appContext: Context) {
 
     val settingsManager: SettingsManager by lazy { SettingsManager(appContext) }
     val memoryManager: MemoryManager by lazy { MemoryManager(appContext) }
-    val database: ChatDatabase by lazy { ChatDatabase.build(appContext) }
     val chatDao: ChatDao by lazy { database.chatDao() }
 
     // ── Repositories ──────────────────────────────────────────

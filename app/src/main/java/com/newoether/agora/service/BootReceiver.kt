@@ -25,11 +25,20 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_TIMEZONE_CHANGED,
             AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED -> {
                 DebugLog.d("BootReceiver", "re-arming automation alarms after ${intent.action}")
-                val scheduler = (context.applicationContext as AgoraApplication).container.automationScheduler
-                scheduler.start()
                 val pendingResult = goAsync()
                 CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                     try {
+                        val container = (context.applicationContext as AgoraApplication)
+                            .awaitContainer()
+                        if (container == null) {
+                            DebugLog.w(
+                                "BootReceiver",
+                                "Skipping alarm re-arm while database startup is blocked",
+                            )
+                            return@launch
+                        }
+                        val scheduler = container.automationScheduler
+                        scheduler.start()
                         scheduler.refreshAndAwait(
                             recalculateForClockChange = intent.action == Intent.ACTION_TIME_CHANGED ||
                                 intent.action == Intent.ACTION_TIMEZONE_CHANGED,

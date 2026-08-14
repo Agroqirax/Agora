@@ -34,7 +34,9 @@ class TaskWorker(
         val taskId = inputData.getString(KEY_TASK_ID) ?: return Result.failure()
         val executionId = inputData.getString(KEY_EXECUTION_ID) ?: return Result.failure()
         val scheduledAt = inputData.getLong(KEY_SCHEDULED_AT, 0L)
-        val container = (applicationContext as AgoraApplication).container
+        val container = (applicationContext as AgoraApplication)
+            .awaitContainer()
+            ?: return Result.failure(workDataOf(KEY_ERROR to "Database unavailable"))
         return try {
             setForeground(
                 AutomationForegroundInfo.create(

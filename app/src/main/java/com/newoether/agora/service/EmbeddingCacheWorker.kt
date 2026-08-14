@@ -60,7 +60,11 @@ class EmbeddingCacheWorker(
         // Container singletons, NOT fresh instances: a second Room instance on the same
         // file bypasses the app's invalidation tracker (UI Flows would go stale), and a
         // second DataStore on the same file throws "multiple DataStores active".
-        val container = (applicationContext as AgoraApplication).container
+        val container = (applicationContext as AgoraApplication)
+            .awaitContainer()
+            ?: return@withContext Result.failure(
+                workDataOf("error" to "Database unavailable"),
+            )
 
         // Same process-wide lock as RagManager's in-app runner: never compute alongside it.
         EmbeddingCacheLocks.forModel(modelId).withLock {
