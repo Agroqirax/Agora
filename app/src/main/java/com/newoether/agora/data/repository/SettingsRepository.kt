@@ -161,7 +161,13 @@ class SettingsRepository(
     val geoJsonChatWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonChatWidgetsEnabled, true)
     val geoJsonTileUrl: StateFlow<String> = hot(settingsManager.geoJsonTileUrl, DEFAULT_GEOJSON_TILE_URL)
     val geoJsonChatWidgetsThemeEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonChatWidgetsThemeEnabled, true)
-    val geoJsonRouteProvider: StateFlow<String> = hot(settingsManager.geoJsonRouteProvider, "osm")
+    val vegaLiteChatWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.vegaLiteChatWidgetsNetworkEnabled, false)
+    val svgChatWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.svgChatWidgetsEnabled, true)
+    val svgChatWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.svgChatWidgetsNetworkEnabled, false)
+    val svgChatWidgetsJsEnabled: StateFlow<Boolean> = hot(settingsManager.svgChatWidgetsJsEnabled, false)
+    val svgChatWidgetsThemeEnabled: StateFlow<Boolean> = hot(settingsManager.svgChatWidgetsThemeEnabled, true)
+    val chartJsChatWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.chartJsChatWidgetsEnabled, true)
+    val chartJsChatWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.chartJsChatWidgetsNetworkEnabled, false)
     val showDocumentationFab: StateFlow<Boolean> = hot(settingsManager.showDocumentationFab, true)
     val developerOptionsEnabled: StateFlow<Boolean> =
         hot(settingsManager.developerOptionsEnabled, false)
@@ -492,7 +498,13 @@ class SettingsRepository(
     fun setGeoJsonChatWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.setGeoJsonChatWidgetsEnabled(enabled) }
     fun setGeoJsonTileUrl(url: String) = scope.launch { settingsManager.setGeoJsonTileUrl(url) }
     fun setGeoJsonChatWidgetsThemeEnabled(enabled: Boolean) = scope.launch { settingsManager.setGeoJsonChatWidgetsThemeEnabled(enabled) }
-    fun setGeoJsonRouteProvider(provider: String) = scope.launch { settingsManager.setGeoJsonRouteProvider(provider) }
+    fun setVegaLiteChatWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.setVegaLiteChatWidgetsNetworkEnabled(enabled) }
+    fun setSvgChatWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.setSvgChatWidgetsEnabled(enabled) }
+    fun setSvgChatWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.setSvgChatWidgetsNetworkEnabled(enabled) }
+    fun setSvgChatWidgetsJsEnabled(enabled: Boolean) = scope.launch { settingsManager.setSvgChatWidgetsJsEnabled(enabled) }
+    fun setSvgChatWidgetsThemeEnabled(enabled: Boolean) = scope.launch { settingsManager.setSvgChatWidgetsThemeEnabled(enabled) }
+    fun setChartJsChatWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.setChartJsChatWidgetsEnabled(enabled) }
+    fun setChartJsChatWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.setChartJsChatWidgetsNetworkEnabled(enabled) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
     fun setDeveloperOptionsEnabled(enabled: Boolean) =
         scope.launch { settingsManager.saveDeveloperOptionsEnabled(enabled) }

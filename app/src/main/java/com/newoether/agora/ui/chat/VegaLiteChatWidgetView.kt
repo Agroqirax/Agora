@@ -170,6 +170,7 @@ private fun buildVegaLiteHtml(specJson: String, themeConfigJson: String, control
 @Composable
 fun VegaLiteChatWidgetCard(
     specSource: String,
+    allowNetwork: Boolean,
     onExpand: (ExpandedChatWidget) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -180,10 +181,10 @@ fun VegaLiteChatWidgetCard(
         ChatWidgetCard(
             sourceText = specSource,
             documentHtml = "<html><body style=\"font-family:sans-serif;color:#b00020;padding:12px;\">Invalid Vega-Lite spec</body></html>",
-            allowNetwork = false,
+            allowNetwork = allowNetwork,
             allowJavaScript = true,
             transparentBackground = true,
-            onExpand = { doc -> onExpand(ExpandedChatWidget(doc, allowNetwork = false, allowJavaScript = true, transparentBackground = true)) },
+            onExpand = { doc -> onExpand(ExpandedChatWidget(doc, allowNetwork = allowNetwork, allowJavaScript = true, transparentBackground = true)) },
             modifier = modifier
         )
         return
@@ -198,10 +199,10 @@ fun VegaLiteChatWidgetCard(
     ChatWidgetCard(
         sourceText = specSource,
         documentHtml = documentHtml,
-        allowNetwork = false,
+        allowNetwork = allowNetwork,
         allowJavaScript = true,
         transparentBackground = true,
-        onExpand = { doc -> onExpand(ExpandedChatWidget(doc, allowNetwork = false, allowJavaScript = true, transparentBackground = true)) },
+        onExpand = { doc -> onExpand(ExpandedChatWidget(doc, allowNetwork = allowNetwork, allowJavaScript = true, transparentBackground = true)) },
         modifier = modifier
     )
 }

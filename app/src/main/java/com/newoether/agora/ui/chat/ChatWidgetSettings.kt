@@ -14,12 +14,18 @@ data class ChatWidgetSettings(
     val htmlNetworkEnabled: Boolean = false,
     val htmlThemeEnabled: Boolean = false,
     val htmlJsEnabled: Boolean = false,
+    val svgEnabled: Boolean = false,
+    val svgNetworkEnabled: Boolean = false,
+    val svgJsEnabled: Boolean = false,
+    val svgThemeEnabled: Boolean = true,
     val mermaidEnabled: Boolean = false,
     val vegaLiteEnabled: Boolean = false,
+    val vegaLiteNetworkEnabled: Boolean = false,
+    val chartJsEnabled: Boolean = false,
+    val chartJsNetworkEnabled: Boolean = false,
     val geoJsonEnabled: Boolean = false,
     val geoJsonTileUrl: String = "",
     val geoJsonThemeEnabled: Boolean = false,
-    val geoJsonRouteProvider: String = "osm",
 )
 
 @Composable
@@ -28,15 +34,22 @@ fun rememberChatWidgetSettings(settings: SettingsRepository): ChatWidgetSettings
     val htmlNetworkEnabled by settings.htmlChatWidgetsNetworkEnabled.collectAsState()
     val htmlThemeEnabled by settings.htmlChatWidgetsThemeEnabled.collectAsState()
     val htmlJsEnabled by settings.htmlChatWidgetsJsEnabled.collectAsState()
+    val svgEnabled by settings.svgChatWidgetsEnabled.collectAsState()
+    val svgNetworkEnabled by settings.svgChatWidgetsNetworkEnabled.collectAsState()
+    val svgJsEnabled by settings.svgChatWidgetsJsEnabled.collectAsState()
+    val svgThemeEnabled by settings.svgChatWidgetsThemeEnabled.collectAsState()
     val mermaidEnabled by settings.mermaidChatWidgetsEnabled.collectAsState()
     val vegaLiteEnabled by settings.vegaLiteChatWidgetsEnabled.collectAsState()
+    val vegaLiteNetworkEnabled by settings.vegaLiteChatWidgetsNetworkEnabled.collectAsState()
+    val chartJsEnabled by settings.chartJsChatWidgetsEnabled.collectAsState()
+    val chartJsNetworkEnabled by settings.chartJsChatWidgetsNetworkEnabled.collectAsState()
     val geoJsonEnabled by settings.geoJsonChatWidgetsEnabled.collectAsState()
     val geoJsonTileUrl by settings.geoJsonTileUrl.collectAsState()
     val geoJsonThemeEnabled by settings.geoJsonChatWidgetsThemeEnabled.collectAsState()
-    val geoJsonRouteProvider by settings.geoJsonRouteProvider.collectAsState()
     return ChatWidgetSettings(
         htmlEnabled, htmlNetworkEnabled, htmlThemeEnabled, htmlJsEnabled,
-        mermaidEnabled, vegaLiteEnabled, geoJsonEnabled,
-        geoJsonTileUrl, geoJsonThemeEnabled, geoJsonRouteProvider,
+        svgEnabled, svgNetworkEnabled, svgJsEnabled, svgThemeEnabled,
+        mermaidEnabled, vegaLiteEnabled, vegaLiteNetworkEnabled, chartJsEnabled, chartJsNetworkEnabled,
+        geoJsonEnabled, geoJsonTileUrl, geoJsonThemeEnabled,
     )
 }

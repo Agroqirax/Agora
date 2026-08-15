@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
@@ -19,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -65,24 +65,17 @@ private fun rememberLeafletCss(): String {
 /** A pin derived from a GeoJSON `Point`/`MultiPoint` feature, for the native "open in maps" chip row. */
 private data class GeoJsonPin(val lat: Double, val lon: Double, val label: String)
 
-private data class ParsedGeoJson(
-    val pins: List<GeoJsonPin>,
-    val routes: List<List<Pair<Double, Double>>>,
-)
-
 /**
- * Walks the fence body just enough to drive the native "open in maps" buttons: finds Point
- * coordinates (pins) and LineString coordinates (routes). The map itself is rendered by Leaflet's
- * own (much more tolerant) GeoJSON parser inside the WebView, so this only needs to succeed at
- * extracting what it can — a `null` return means the body isn't even valid JSON, which is the one
- * case the widget treats as a hard error.
+ * Walks the fence body just enough to drive the native "open in maps" pin buttons: finds Point
+ * coordinates. The map itself is rendered by Leaflet's own (much more tolerant) GeoJSON parser
+ * inside the WebView, so this only needs to succeed at extracting what it can — a `null` return
+ * means the body isn't even valid JSON, which is the one case the widget treats as a hard error.
  */
-private fun parseGeoJsonForButtons(source: String): ParsedGeoJson? {
+private fun parseGeoJsonPins(source: String): List<GeoJsonPin>? {
     val root = try { Json.parseToJsonElement(source) } catch (_: Exception) { return null }
     val obj = root as? JsonObject ?: return null
 
     val pins = mutableListOf<GeoJsonPin>()
-    val routes = mutableListOf<List<Pair<Double, Double>>>()
     var pinCounter = 0
 
     fun coordPair(element: JsonElement?): Pair<Double, Double>? {
@@ -106,19 +99,11 @@ private fun parseGeoJsonForButtons(source: String): ParsedGeoJson? {
                     pins += GeoJsonPin(lat, lon, label ?: "Pin $pinCounter")
                 }
             }
-            "LineString" -> {
-                val pts = (coordinates as? JsonArray)?.mapNotNull { coordPair(it) } ?: emptyList()
-                if (pts.size >= 2) routes += pts
-            }
-            "MultiLineString" -> (coordinates as? JsonArray)?.forEach { line ->
-                val pts = (line as? JsonArray)?.mapNotNull { coordPair(it) } ?: emptyList()
-                if (pts.size >= 2) routes += pts
-            }
             "GeometryCollection" -> (geometry["geometries"] as? JsonArray)?.forEach { g ->
                 (g as? JsonObject)?.let { handleGeometry(it, label) }
             }
-            // Polygon/MultiPolygon: rendered on the map by Leaflet, but an area doesn't reduce to
-            // a single geo: point worth a button — skipped here.
+            // LineString/MultiLineString/Polygon/MultiPolygon: rendered on the map by Leaflet, but
+            // none of them reduce to a single geo: point worth a pin button — skipped here.
         }
     }
 
@@ -136,42 +121,12 @@ private fun parseGeoJsonForButtons(source: String): ParsedGeoJson? {
     }
 
     // Cap what's shown: a handful of pin chips reads fine, an unbounded row from a large
-    // FeatureCollection wouldn't. Only the first route gets a button — multiple simultaneous
-    // "open route" targets don't map cleanly onto a single maps-app hand-off anyway.
-    return ParsedGeoJson(pins.take(5), routes.take(1))
+    // FeatureCollection wouldn't.
+    return pins.take(5)
 }
 
 private fun geoUri(lat: Double, lon: Double, label: String): Uri =
     Uri.parse("geo:$lat,$lon?q=$lat,$lon(${Uri.encode(label)})")
-
-/**
- * A directions URL for [points] (a LineString), for the "Open Route" button. `geo:` URIs can't
- * express a multi-stop route, so this always builds an `https://` link instead — [provider]
- * chooses which site/app it targets, defaulting to OpenStreetMap so a FOSS build doesn't hand
- * users to Google Maps by default (Google Maps remains an opt-in choice for full multi-waypoint
- * support, since OSM's own directions URL only carries an origin/destination pair).
- */
-private fun routeUri(points: List<Pair<Double, Double>>, provider: String): Uri {
-    val origin = points.first()
-    val destination = points.last()
-    return when (provider) {
-        "google" -> {
-            val waypoints = points.drop(1).dropLast(1).take(23)
-            val builder = Uri.parse("https://www.google.com/maps/dir/").buildUpon()
-                .appendQueryParameter("api", "1")
-                .appendQueryParameter("origin", "${origin.first},${origin.second}")
-                .appendQueryParameter("destination", "${destination.first},${destination.second}")
-            if (waypoints.isNotEmpty()) {
-                builder.appendQueryParameter("waypoints", waypoints.joinToString("|") { "${it.first},${it.second}" })
-            }
-            builder.build()
-        }
-        else -> Uri.parse("https://www.openstreetmap.org/directions").buildUpon()
-            .appendQueryParameter("engine", "fossgis_osrm_car")
-            .appendQueryParameter("route", "${origin.first},${origin.second};${destination.first},${destination.second}")
-            .build()
-    }
-}
 
 private fun openInMapsApp(context: Context, uri: Uri) {
     try {
@@ -208,6 +163,11 @@ private fun buildGeoJsonHtml(
     primaryColor: String,
     onPrimaryColor: String,
     surfaceVariantColor: String,
+    onSurfaceColor: String,
+    outlineColor: String,
+    controlBgColor: String,
+    controlHoverColor: String,
+    controlDisabledColor: String,
 ): String {
     val safeData = geoJsonSource.replace("</", "<\\/")
     val safeTileUrl = tileUrl.replace("'", "\\'")
@@ -228,6 +188,18 @@ private fun buildGeoJsonHtml(
         html, body { background: transparent; margin: 0; padding: 0; height: 100%; overflow: hidden; }
         #map { position: absolute; top: 0; left: 0; background: transparent; }
         .leaflet-control-attribution { font-size: 9px; }
+        .leaflet-bar { box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+        .leaflet-bar a {
+          background-color: $controlBgColor;
+          color: $onSurfaceColor;
+          border-bottom: 1px solid $outlineColor;
+        }
+        .leaflet-bar a:hover,
+        .leaflet-bar a:focus { background-color: $controlHoverColor; }
+        .leaflet-bar a.leaflet-disabled {
+          background-color: $controlBgColor;
+          color: $controlDisabledColor;
+        }
         $tileFilterCss
         </style>
         </head>
@@ -295,7 +267,6 @@ fun GeoJsonChatWidgetCard(
     source: String,
     tileUrl: String,
     themeTiles: Boolean,
-    routeProvider: String,
     onExpand: (ExpandedChatWidget) -> Unit,
     modifier: Modifier = Modifier,
     // The raw-source toggle shows this instead of [source] when set — for gpx/kml input,
@@ -303,8 +274,8 @@ fun GeoJsonChatWidgetCard(
     // action should show the original GPX/KML text the model actually authored.
     displaySource: String = source,
 ) {
-    val parsed = remember(source) { parseGeoJsonForButtons(source) }
-    if (parsed == null) {
+    val pins = remember(source) { parseGeoJsonPins(source) }
+    if (pins == null) {
         ChatWidgetCard(
             sourceText = displaySource,
             documentHtml = "<html><body style=\"font-family:sans-serif;color:#b00020;padding:12px;\">Invalid GeoJSON</body></html>",
@@ -324,9 +295,22 @@ fun GeoJsonChatWidgetCard(
     val primaryColor = scheme.primary.toArgb().toCssHex()
     val onPrimaryColor = scheme.onPrimary.toArgb().toCssHex()
     val surfaceVariantColor = scheme.surfaceVariant.toArgb().toCssHex()
+    val onSurfaceColor = scheme.onSurface.toArgb().toCssHex()
+    val outlineColor = scheme.outline.toArgb().toCssHex()
+    val controlBgColor = scheme.surfaceContainer.toArgb().toCssHex()
+    val controlHoverColor = scheme.surfaceContainerHighest.toArgb().toCssHex()
+    val controlDisabledColor = scheme.onSurface.copy(alpha = 0.38f).compositeOver(scheme.surfaceContainer).toArgb().toCssHex()
     val darkMode = LocalDarkTheme.current
-    val documentHtml = remember(source, tileUrl, themeTiles, darkMode, leafletJs, leafletCss, primaryColor, onPrimaryColor, surfaceVariantColor) {
-        buildGeoJsonHtml(source, tileUrl, themeTiles, darkMode, leafletCss, leafletJs, primaryColor, onPrimaryColor, surfaceVariantColor)
+    val documentHtml = remember(
+        source, tileUrl, themeTiles, darkMode, leafletJs, leafletCss,
+        primaryColor, onPrimaryColor, surfaceVariantColor,
+        onSurfaceColor, outlineColor, controlBgColor, controlHoverColor, controlDisabledColor,
+    ) {
+        buildGeoJsonHtml(
+            source, tileUrl, themeTiles, darkMode, leafletCss, leafletJs,
+            primaryColor, onPrimaryColor, surfaceVariantColor,
+            onSurfaceColor, outlineColor, controlBgColor, controlHoverColor, controlDisabledColor,
+        )
     }
 
     Column(modifier = modifier) {
@@ -339,25 +323,18 @@ fun GeoJsonChatWidgetCard(
             onExpand = { doc -> onExpand(ExpandedChatWidget(doc, allowNetwork = true, allowJavaScript = true, transparentBackground = true)) },
             fixedHeight = GeoJsonMapHeight,
         )
-        if (parsed.pins.isNotEmpty() || parsed.routes.isNotEmpty()) {
+        if (pins.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .padding(top = 8.dp)
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                parsed.pins.forEach { pin ->
+                pins.forEach { pin ->
                     AssistChip(
                         onClick = { openInMapsApp(context, geoUri(pin.lat, pin.lon, pin.label)) },
                         label = { Text(pin.label) },
                         leadingIcon = { Icon(Icons.Default.Place, contentDescription = null) }
-                    )
-                }
-                parsed.routes.firstOrNull()?.let { route ->
-                    AssistChip(
-                        onClick = { openInMapsApp(context, routeUri(route, routeProvider)) },
-                        label = { Text("Open Route") },
-                        leadingIcon = { Icon(Icons.Default.Directions, contentDescription = null) }
                     )
                 }
             }

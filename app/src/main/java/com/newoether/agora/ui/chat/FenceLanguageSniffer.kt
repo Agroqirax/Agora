@@ -29,8 +29,9 @@ fun sniffGenericFenceLanguage(declaredLanguage: String?, body: String): String? 
     "json" -> sniffJsonChatWidgetLanguage(body)
     "xml" -> sniffXmlChatWidgetLanguage(body)
     // An `svg` fence is unambiguous on its own — an `<svg>` element is valid HTML fragment
-    // content, so the html widget renders it directly with no further sniffing needed.
-    "svg" -> "html"
+    // content, rendered by the svg widget (its own toggle, reusing the html widget's
+    // network/JS settings) with no further sniffing needed.
+    "svg" -> "svg"
     else -> null
 }
 
@@ -61,7 +62,7 @@ private fun sniffXmlChatWidgetLanguage(body: String): String? {
                     "gpx" -> "gpx"
                     "kml" -> "kml"
                     // SVG is well-formed XML, and models sometimes tag it `xml` rather than `svg`.
-                    "svg" -> "html"
+                    "svg" -> "svg"
                     else -> null
                 }
             }

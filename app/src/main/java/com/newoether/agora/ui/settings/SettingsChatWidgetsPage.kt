@@ -10,10 +10,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Directions
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -40,13 +41,18 @@ fun SettingsChatWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val htmlNetworkEnabled by viewModel.settings.htmlChatWidgetsNetworkEnabled.collectAsState()
     val htmlThemeEnabled by viewModel.settings.htmlChatWidgetsThemeEnabled.collectAsState()
     val htmlJsEnabled by viewModel.settings.htmlChatWidgetsJsEnabled.collectAsState()
+    val svgEnabled by viewModel.settings.svgChatWidgetsEnabled.collectAsState()
+    val svgNetworkEnabled by viewModel.settings.svgChatWidgetsNetworkEnabled.collectAsState()
+    val svgJsEnabled by viewModel.settings.svgChatWidgetsJsEnabled.collectAsState()
+    val svgThemeEnabled by viewModel.settings.svgChatWidgetsThemeEnabled.collectAsState()
     val mermaidEnabled by viewModel.settings.mermaidChatWidgetsEnabled.collectAsState()
     val vegaLiteEnabled by viewModel.settings.vegaLiteChatWidgetsEnabled.collectAsState()
+    val vegaLiteNetworkEnabled by viewModel.settings.vegaLiteChatWidgetsNetworkEnabled.collectAsState()
+    val chartJsEnabled by viewModel.settings.chartJsChatWidgetsEnabled.collectAsState()
+    val chartJsNetworkEnabled by viewModel.settings.chartJsChatWidgetsNetworkEnabled.collectAsState()
     val geoJsonEnabled by viewModel.settings.geoJsonChatWidgetsEnabled.collectAsState()
     val geoJsonTileUrl by viewModel.settings.geoJsonTileUrl.collectAsState()
     val geoJsonThemeEnabled by viewModel.settings.geoJsonChatWidgetsThemeEnabled.collectAsState()
-    val geoJsonRouteProvider by viewModel.settings.geoJsonRouteProvider.collectAsState()
-    var showRouteProviderDialog by remember { mutableStateOf(false) }
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.settings_chat_widgets),
@@ -104,6 +110,55 @@ fun SettingsChatWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
             })
 
+            SettingsGroup(title = stringResource(R.string.settings_svg_chat_widgets), items = buildList {
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.svg_chat_widgets_enable)) },
+                        supportingContent = { Text(stringResource(R.string.svg_chat_widgets_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = {
+                            Switch(checked = svgEnabled, onCheckedChange = { viewModel.settings.setSvgChatWidgetsEnabled(it) })
+                        },
+                        modifier = Modifier.clickable { viewModel.settings.setSvgChatWidgetsEnabled(!svgEnabled) }
+                    )
+                }
+                if (svgEnabled) {
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.svg_chat_widgets_network_enable)) },
+                            supportingContent = { Text(stringResource(R.string.svg_chat_widgets_network_enable_desc)) },
+                            leadingContent = { Icon(Icons.Default.Public, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Switch(checked = svgNetworkEnabled, onCheckedChange = { viewModel.settings.setSvgChatWidgetsNetworkEnabled(it) })
+                            },
+                            modifier = Modifier.clickable { viewModel.settings.setSvgChatWidgetsNetworkEnabled(!svgNetworkEnabled) }
+                        )
+                    }
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.svg_chat_widgets_js_enable)) },
+                            supportingContent = { Text(stringResource(R.string.svg_chat_widgets_js_enable_desc)) },
+                            leadingContent = { Icon(Icons.Default.Code, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Switch(checked = svgJsEnabled, onCheckedChange = { viewModel.settings.setSvgChatWidgetsJsEnabled(it) })
+                            },
+                            modifier = Modifier.clickable { viewModel.settings.setSvgChatWidgetsJsEnabled(!svgJsEnabled) }
+                        )
+                    }
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.svg_chat_widgets_theme_enable)) },
+                            supportingContent = { Text(stringResource(R.string.svg_chat_widgets_theme_enable_desc)) },
+                            leadingContent = { Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Switch(checked = svgThemeEnabled, onCheckedChange = { viewModel.settings.setSvgChatWidgetsThemeEnabled(it) })
+                            },
+                            modifier = Modifier.clickable { viewModel.settings.setSvgChatWidgetsThemeEnabled(!svgThemeEnabled) }
+                        )
+                    }
+                }
+            })
+
             SettingsGroup(title = stringResource(R.string.settings_mermaid_chat_widgets), items = listOf({
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.mermaid_chat_widgets_enable)) },
@@ -116,17 +171,59 @@ fun SettingsChatWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 )
             }))
 
-            SettingsGroup(title = stringResource(R.string.settings_vega_lite_chat_widgets), items = listOf({
-                SettingsItem(
-                    headlineContent = { Text(stringResource(R.string.vega_lite_chat_widgets_enable)) },
-                    supportingContent = { Text(stringResource(R.string.vega_lite_chat_widgets_enable_desc)) },
-                    leadingContent = { Icon(Icons.Default.BarChart, null, tint = MaterialTheme.colorScheme.primary) },
-                    trailingContent = {
-                        Switch(checked = vegaLiteEnabled, onCheckedChange = { viewModel.settings.setVegaLiteChatWidgetsEnabled(it) })
-                    },
-                    modifier = Modifier.clickable { viewModel.settings.setVegaLiteChatWidgetsEnabled(!vegaLiteEnabled) }
-                )
-            }))
+            SettingsGroup(title = stringResource(R.string.settings_vega_lite_chat_widgets), items = buildList {
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.vega_lite_chat_widgets_enable)) },
+                        supportingContent = { Text(stringResource(R.string.vega_lite_chat_widgets_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.BarChart, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = {
+                            Switch(checked = vegaLiteEnabled, onCheckedChange = { viewModel.settings.setVegaLiteChatWidgetsEnabled(it) })
+                        },
+                        modifier = Modifier.clickable { viewModel.settings.setVegaLiteChatWidgetsEnabled(!vegaLiteEnabled) }
+                    )
+                }
+                if (vegaLiteEnabled) {
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.vega_lite_chat_widgets_network_enable)) },
+                            supportingContent = { Text(stringResource(R.string.vega_lite_chat_widgets_network_enable_desc)) },
+                            leadingContent = { Icon(Icons.Default.Public, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Switch(checked = vegaLiteNetworkEnabled, onCheckedChange = { viewModel.settings.setVegaLiteChatWidgetsNetworkEnabled(it) })
+                            },
+                            modifier = Modifier.clickable { viewModel.settings.setVegaLiteChatWidgetsNetworkEnabled(!vegaLiteNetworkEnabled) }
+                        )
+                    }
+                }
+            })
+
+            SettingsGroup(title = stringResource(R.string.settings_chartjs_chat_widgets), items = buildList {
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.chartjs_chat_widgets_enable)) },
+                        supportingContent = { Text(stringResource(R.string.chartjs_chat_widgets_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.ShowChart, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = {
+                            Switch(checked = chartJsEnabled, onCheckedChange = { viewModel.settings.setChartJsChatWidgetsEnabled(it) })
+                        },
+                        modifier = Modifier.clickable { viewModel.settings.setChartJsChatWidgetsEnabled(!chartJsEnabled) }
+                    )
+                }
+                if (chartJsEnabled) {
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.chartjs_chat_widgets_network_enable)) },
+                            supportingContent = { Text(stringResource(R.string.chartjs_chat_widgets_network_enable_desc)) },
+                            leadingContent = { Icon(Icons.Default.Public, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Switch(checked = chartJsNetworkEnabled, onCheckedChange = { viewModel.settings.setChartJsChatWidgetsNetworkEnabled(it) })
+                            },
+                            modifier = Modifier.clickable { viewModel.settings.setChartJsChatWidgetsNetworkEnabled(!chartJsNetworkEnabled) }
+                        )
+                    }
+                }
+            })
 
             SettingsGroup(title = stringResource(R.string.settings_geojson_chat_widgets), items = buildList {
                 add {
@@ -188,60 +285,8 @@ fun SettingsChatWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             modifier = Modifier.clickable { viewModel.settings.setGeoJsonChatWidgetsThemeEnabled(!geoJsonThemeEnabled) }
                         )
                     }
-                    add {
-                        SettingsItem(
-                            headlineContent = { Text(stringResource(R.string.geojson_route_provider_label)) },
-                            supportingContent = {
-                                Text(
-                                    when (geoJsonRouteProvider) {
-                                        "google" -> stringResource(R.string.geojson_route_provider_google)
-                                        else -> stringResource(R.string.geojson_route_provider_osm)
-                                    }
-                                )
-                            },
-                            leadingContent = { Icon(Icons.Default.Directions, null, tint = MaterialTheme.colorScheme.primary) },
-                            modifier = Modifier.clickable { showRouteProviderDialog = true }
-                        )
-                    }
                 }
             })
         }
-    }
-
-    if (showRouteProviderDialog) {
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { showRouteProviderDialog = false },
-            title = { Text(stringResource(R.string.geojson_select_route_provider), fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    val providers = listOf(
-                        "osm" to (R.string.geojson_route_provider_osm to R.string.geojson_route_provider_osm_desc),
-                        "google" to (R.string.geojson_route_provider_google to R.string.geojson_route_provider_google_desc),
-                    )
-                    providers.forEach { (key, labels) ->
-                        val (labelRes, descRes) = labels
-                        SettingsItem(
-                            headlineContent = { Text(stringResource(labelRes), fontWeight = if (geoJsonRouteProvider == key) FontWeight.Bold else FontWeight.Normal) },
-                            supportingContent = { Text(stringResource(descRes)) },
-                            leadingContent = {
-                                RadioButton(
-                                    selected = geoJsonRouteProvider == key,
-                                    onClick = {
-                                        viewModel.settings.setGeoJsonRouteProvider(key)
-                                        showRouteProviderDialog = false
-                                    }
-                                )
-                            },
-                            modifier = Modifier.clickable {
-                                viewModel.settings.setGeoJsonRouteProvider(key)
-                                showRouteProviderDialog = false
-                            }
-                        )
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showRouteProviderDialog = false }) { Text(stringResource(R.string.provider_cancel)) } }
-        )
     }
 }

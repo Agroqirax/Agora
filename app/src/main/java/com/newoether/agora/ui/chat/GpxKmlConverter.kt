@@ -203,7 +203,6 @@ fun GpxChatWidgetCard(
     source: String,
     tileUrl: String,
     themeTiles: Boolean,
-    routeProvider: String,
     onExpand: (ExpandedChatWidget) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -216,7 +215,6 @@ fun GpxChatWidgetCard(
         source = converted,
         tileUrl = tileUrl,
         themeTiles = themeTiles,
-        routeProvider = routeProvider,
         onExpand = onExpand,
         modifier = modifier,
         displaySource = source,
@@ -229,7 +227,6 @@ fun KmlChatWidgetCard(
     source: String,
     tileUrl: String,
     themeTiles: Boolean,
-    routeProvider: String,
     onExpand: (ExpandedChatWidget) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -242,7 +239,6 @@ fun KmlChatWidgetCard(
         source = converted,
         tileUrl = tileUrl,
         themeTiles = themeTiles,
-        routeProvider = routeProvider,
         onExpand = onExpand,
         modifier = modifier,
         displaySource = source,

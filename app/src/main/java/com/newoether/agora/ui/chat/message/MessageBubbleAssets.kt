@@ -42,6 +42,7 @@ import com.newoether.agora.ui.components.LatexImageTransformer
 import com.newoether.agora.ui.chat.caseInsensitiveMatchRanges
 import com.newoether.agora.ui.chat.visibleMarkdownMatchRanges
 import com.newoether.agora.ui.chat.ChatWidgetSettings
+import com.newoether.agora.ui.chat.ChartJsChatWidgetCard
 import com.newoether.agora.ui.chat.ExpandedChatWidget
 import com.newoether.agora.ui.chat.GeoJsonChatWidgetCard
 import com.newoether.agora.ui.chat.GpxChatWidgetCard
@@ -184,6 +185,16 @@ internal fun rememberChatMarkdownAssets(
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             },
+            ChatWidgetFenceSpec(fenceLanguage = "svg", enabled = s.svgEnabled) { body ->
+                HtmlChatWidgetCard(
+                    html = body,
+                    allowNetwork = s.svgNetworkEnabled,
+                    allowJavaScript = s.svgJsEnabled,
+                    matchAppTheme = s.svgThemeEnabled,
+                    onExpand = onChatWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
             ChatWidgetFenceSpec(fenceLanguage = "mermaid", enabled = s.mermaidEnabled) { body ->
                 MermaidChatWidgetCard(
                     diagramSource = body,
@@ -194,6 +205,15 @@ internal fun rememberChatMarkdownAssets(
             ChatWidgetFenceSpec(fenceLanguage = "vega-lite", enabled = s.vegaLiteEnabled) { body ->
                 VegaLiteChatWidgetCard(
                     specSource = body,
+                    allowNetwork = s.vegaLiteNetworkEnabled,
+                    onExpand = onChatWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            ChatWidgetFenceSpec(fenceLanguage = "chartjs", enabled = s.chartJsEnabled) { body ->
+                ChartJsChatWidgetCard(
+                    scriptSource = body,
+                    allowNetwork = s.chartJsNetworkEnabled,
                     onExpand = onChatWidgetClick,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
@@ -203,7 +223,6 @@ internal fun rememberChatMarkdownAssets(
                     source = body,
                     tileUrl = s.geoJsonTileUrl,
                     themeTiles = s.geoJsonThemeEnabled,
-                    routeProvider = s.geoJsonRouteProvider,
                     onExpand = onChatWidgetClick,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
@@ -213,7 +232,6 @@ internal fun rememberChatMarkdownAssets(
                     source = body,
                     tileUrl = s.geoJsonTileUrl,
                     themeTiles = s.geoJsonThemeEnabled,
-                    routeProvider = s.geoJsonRouteProvider,
                     onExpand = onChatWidgetClick,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
@@ -223,7 +241,6 @@ internal fun rememberChatMarkdownAssets(
                     source = body,
                     tileUrl = s.geoJsonTileUrl,
                     themeTiles = s.geoJsonThemeEnabled,
-                    routeProvider = s.geoJsonRouteProvider,
                     onExpand = onChatWidgetClick,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )

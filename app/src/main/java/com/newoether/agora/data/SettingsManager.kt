@@ -141,7 +141,15 @@ class SettingsManager(private val context: Context) {
     val geoJsonChatWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_CHAT_WIDGETS_ENABLED] ?: true }
     val geoJsonTileUrl: Flow<String> = context.dataStore.data.map { it[GEOJSON_TILE_URL] ?: DEFAULT_GEOJSON_TILE_URL }
     val geoJsonChatWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_CHAT_WIDGETS_THEME_ENABLED] ?: true }
-    val geoJsonRouteProvider: Flow<String> = context.dataStore.data.map { it[GEOJSON_ROUTE_PROVIDER] ?: "osm" }
+    val vegaLiteChatWidgetsNetworkEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[VEGA_LITE_CHAT_WIDGETS_NETWORK_ENABLED] ?: false }
+    val svgChatWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[SVG_CHAT_WIDGETS_ENABLED] ?: true }
+    val svgChatWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[SVG_CHAT_WIDGETS_NETWORK_ENABLED] ?: false }
+    val svgChatWidgetsJsEnabled: Flow<Boolean> = context.dataStore.data.map { it[SVG_CHAT_WIDGETS_JS_ENABLED] ?: false }
+    val svgChatWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[SVG_CHAT_WIDGETS_THEME_ENABLED] ?: true }
+    val chartJsChatWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[CHARTJS_CHAT_WIDGETS_ENABLED] ?: true }
+    val chartJsChatWidgetsNetworkEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[CHARTJS_CHAT_WIDGETS_NETWORK_ENABLED] ?: false }
 
     val searchContextWindow: Flow<Int> = context.dataStore.data.map { it[SEARCH_CONTEXT_WINDOW] ?: 8 }
     val searchMatchLimit: Flow<Int> = context.dataStore.data.map { it[SEARCH_MATCH_LIMIT] ?: 10 }
@@ -547,8 +555,26 @@ class SettingsManager(private val context: Context) {
     suspend fun setGeoJsonChatWidgetsThemeEnabled(enabled: Boolean) {
         context.dataStore.edit { it[GEOJSON_CHAT_WIDGETS_THEME_ENABLED] = enabled }
     }
-    suspend fun setGeoJsonRouteProvider(provider: String) {
-        context.dataStore.edit { it[GEOJSON_ROUTE_PROVIDER] = provider }
+    suspend fun setVegaLiteChatWidgetsNetworkEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[VEGA_LITE_CHAT_WIDGETS_NETWORK_ENABLED] = enabled }
+    }
+    suspend fun setSvgChatWidgetsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[SVG_CHAT_WIDGETS_ENABLED] = enabled }
+    }
+    suspend fun setSvgChatWidgetsNetworkEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[SVG_CHAT_WIDGETS_NETWORK_ENABLED] = enabled }
+    }
+    suspend fun setSvgChatWidgetsJsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[SVG_CHAT_WIDGETS_JS_ENABLED] = enabled }
+    }
+    suspend fun setSvgChatWidgetsThemeEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[SVG_CHAT_WIDGETS_THEME_ENABLED] = enabled }
+    }
+    suspend fun setChartJsChatWidgetsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[CHARTJS_CHAT_WIDGETS_ENABLED] = enabled }
+    }
+    suspend fun setChartJsChatWidgetsNetworkEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[CHARTJS_CHAT_WIDGETS_NETWORK_ENABLED] = enabled }
     }
 
     suspend fun saveSearchMatchLimit(n: Int) {
@@ -898,7 +924,13 @@ class SettingsManager(private val context: Context) {
             prefs.remove(GEOJSON_CHAT_WIDGETS_ENABLED)
             prefs.remove(GEOJSON_TILE_URL)
             prefs.remove(GEOJSON_CHAT_WIDGETS_THEME_ENABLED)
-            prefs.remove(GEOJSON_ROUTE_PROVIDER)
+            prefs.remove(VEGA_LITE_CHAT_WIDGETS_NETWORK_ENABLED)
+            prefs.remove(SVG_CHAT_WIDGETS_ENABLED)
+            prefs.remove(SVG_CHAT_WIDGETS_NETWORK_ENABLED)
+            prefs.remove(SVG_CHAT_WIDGETS_JS_ENABLED)
+            prefs.remove(SVG_CHAT_WIDGETS_THEME_ENABLED)
+            prefs.remove(CHARTJS_CHAT_WIDGETS_ENABLED)
+            prefs.remove(CHARTJS_CHAT_WIDGETS_NETWORK_ENABLED)
             prefs.remove(SEARCH_CONTEXT_WINDOW)
             prefs.remove(SEARCH_MATCH_LIMIT)
             prefs.remove(RAG_THRESHOLD)
