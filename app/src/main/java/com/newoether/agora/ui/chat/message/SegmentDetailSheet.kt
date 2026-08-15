@@ -76,6 +76,7 @@ import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.ui.theme.ChatType
+import com.newoether.agora.util.NoAutoScrollSelectionContainer
 import com.newoether.agora.util.noOpBringIntoView
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -522,19 +523,23 @@ internal fun SegmentDetailSheet(
                                     .noOpBringIntoView()
                                     .navigationBarsPadding(),
                             ) { revealModifier, onReady ->
-                                LazyMarkdownTextContent(
-                                    text = seg.content,
-                                    renderContext = markdownRenderContext,
-                                    listState = lazyDetailListState,
+                                NoAutoScrollSelectionContainer(
                                     modifier = revealModifier.fillMaxSize(),
-                                    contentPadding = PaddingValues(
-                                        start = 24.dp,
-                                        top = 4.dp,
-                                        end = 24.dp,
-                                        bottom = 32.dp,
-                                    ),
-                                    onReady = onReady,
-                                )
+                                ) {
+                                    LazyMarkdownTextContent(
+                                        text = seg.content,
+                                        renderContext = markdownRenderContext,
+                                        listState = lazyDetailListState,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentPadding = PaddingValues(
+                                            start = 24.dp,
+                                            top = 4.dp,
+                                            end = 24.dp,
+                                            bottom = 32.dp,
+                                        ),
+                                        onReady = onReady,
+                                    )
+                                }
                             }
                         } else {
                             // Tool and grouped details use one conventional scroll owner. An

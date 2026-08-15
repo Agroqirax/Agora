@@ -35,6 +35,19 @@ class StreamingMarkdownMessageSourceContractTest {
     }
 
     @Test
+    fun `finalized virtualized Thinking detail remains selectable without auto scroll`() {
+        val detail = source(locateMainSourceRoot(), "SegmentDetailSheet.kt")
+        val virtualizedDetail = detail
+            .substringAfter("val detailPageContent")
+            .substringAfter("if (usesVirtualizedSingleMarkdown)")
+            .substringBefore("} else {")
+
+        assertTrue(virtualizedDetail.contains("NoAutoScrollSelectionContainer("))
+        assertTrue(virtualizedDetail.contains("LazyMarkdownTextContent("))
+        assertTrue(detail.contains("selectionEnabled = !isStreaming"))
+    }
+
+    @Test
     fun `generation error bar is one stateless sibling rather than Markdown state`() {
         val root = locateMainSourceRoot()
         val wrapper = source(root, "StreamingMarkdownMessage.kt")

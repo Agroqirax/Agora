@@ -85,6 +85,12 @@ No owner may infer the other capability from a matching company name or legacy s
   [citations.md](citations.md): structured Provider metadata is durable answer metadata and renders
   as numbered answer/source references. Hiding Gemini's `google_search` presentation never removes,
   replaces, or executes its durable hosted-tool block.
+- Visible generic and provider-hosted search results share one clean result-list presentation in the
+  tool detail sheet. Result title, snippet, and URL/source must form three unambiguous semantic tiers:
+  the 16 sp-equivalent SemiBold title is dominant, the 13 sp Normal snippet is subordinate, and the
+  11-12 sp URL/source is tertiary in primary color. Rows use deliberate internal spacing and subtle
+  separators rather than equal-weight filled cards. Presentation must preserve result order and the
+  existing title, URL, and snippet fallback data without changing search execution or settlement.
 
 ## 6. Failure and security behavior
 

@@ -252,6 +252,12 @@ a caller must not disable that fade merely to hide a surrounding answering-tail 
 message list may own that separate dot, while Thinking and Compact Bottom Sheets omit it without
 changing Markdown rendering. Typography or placeholder differences must remain parameterized.
 
+Finalized Thinking Bottom Sheet Markdown is selectable in every rendering branch, including the
+virtualized single-segment long-document path. Selection uses the shared no-auto-scroll selection
+host so dragging handles never repositions the conversation. Active streaming content remains
+non-selectable; once that same renderer reaches terminal state, selection is enabled without
+switching Markdown implementations or disabling virtualization.
+
 The red generation error bar is not Markdown syntax or renderer state. It is one stateless shared UI
 component, not a domain/state object. The ordinary answer body and detail Bottom Sheets render this
 same component beside the shared Markdown implementation, driven by the existing error value. It
