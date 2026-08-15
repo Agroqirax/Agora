@@ -24,6 +24,7 @@ class GenerationToolExecutorTest {
                 name = "known_tool",
                 arguments = "{}",
                 context = GenerationContext(),
+                authorizedToolNames = setOf("known_tool"),
             ),
             onEvent = events::add,
         )
@@ -47,6 +48,7 @@ class GenerationToolExecutorTest {
                 name = "known_tool",
                 arguments = "{",
                 context = GenerationContext(),
+                authorizedToolNames = setOf("known_tool"),
             ),
             onEvent = {},
         )
@@ -55,6 +57,28 @@ class GenerationToolExecutorTest {
         assertEquals("call-invalid", executed.callId)
         assertTrue(executed.result.isError)
         assertTrue(executed.result.text.contains("complete JSON object"))
+        assertEquals(0, provider.executionCount)
+    }
+
+    @Test
+    fun `call omitted from the frozen definition set never reaches a matching provider`() = runTest {
+        val provider = FakeToolProvider()
+        val executor = GenerationToolExecutor.forTest(listOf(provider))
+
+        val executed = executor.execute(
+            call = AuthorizedToolCall(
+                batchIdentity = BATCH_IDENTITY,
+                callId = "call-disabled",
+                name = "known_tool",
+                arguments = "{}",
+                context = GenerationContext(),
+                authorizedToolNames = emptySet(),
+            ),
+            onEvent = {},
+        )
+
+        assertTrue(executed.result.isError)
+        assertTrue(executed.result.text.contains("not authorized"))
         assertEquals(0, provider.executionCount)
     }
 
@@ -80,6 +104,7 @@ class GenerationToolExecutorTest {
                 name = "blocking_tool",
                 arguments = "{}",
                 context = GenerationContext(toolTimeoutMs = 25L),
+                authorizedToolNames = setOf("blocking_tool"),
             ),
             onEvent = {},
         )

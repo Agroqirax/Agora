@@ -11,9 +11,13 @@ import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 
+internal fun MessageSegment.isHiddenFromMessagePresentation(): Boolean =
+    type == "tool" && toolName == "google_search"
+
 internal fun mergeAdjacentSegments(segs: List<MessageSegment>): List<MessageSegment> {
     val merged = mutableListOf<MessageSegment>()
     for (seg in segs) {
+        if (seg.type == "citation" || seg.isHiddenFromMessagePresentation()) continue
         val last = merged.lastOrNull()
         // Only continuous answer/reasoning text is merged into one flowing block.
         // Transcriptions stay separate: each describes a distinct image, so a
@@ -40,10 +44,15 @@ private fun mergeDurationMs(first: Long?, second: Long?): Long? {
     return merged.takeIf { it > 0L }
 }
 
-internal fun thoughtDurationMs(segs: List<MessageSegment>): Long? {
-    return segs.sumOf { seg ->
-        if (seg.type == "thought") seg.durationMs ?: 0L else 0L
-    }.takeIf { it > 0L }
+internal fun thoughtDurationMs(
+    segs: List<MessageSegment>,
+    fallbackMs: Long? = null,
+): Long? {
+    val thoughtSegments = segs.filter { it.type == "thought" }
+    if (thoughtSegments.isEmpty()) return null
+    return thoughtSegments.sumOf { it.durationMs ?: 0L }
+        .takeIf { it > 0L }
+        ?: fallbackMs?.takeIf { it > 0L }
 }
 
 private fun MessageSegment.isBlankAnswerSegment(): Boolean =

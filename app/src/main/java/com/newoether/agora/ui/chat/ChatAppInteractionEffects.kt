@@ -30,6 +30,7 @@ import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.isContextCompact
 import com.newoether.agora.ui.chat.message.hasActiveAnswerSegment
 import com.newoether.agora.ui.common.AgoraHaptics
 import com.newoether.agora.ui.motion.AgoraMotionPolicy
@@ -246,7 +247,8 @@ internal fun ConversationShareEffect(
                 viewModel.emitSnackbar(
                     shareFailureTemplate.replace(
                         SHARE_ERROR_DETAIL_TOKEN,
-                        e.localizedMessage ?: e.javaClass.simpleName,
+                        e.localizedMessage?.let(viewModel::displayText)
+                            ?: e.javaClass.simpleName,
                     )
                 )
             }
@@ -376,9 +378,10 @@ internal fun answeringHapticEligible(
     presentation: com.newoether.agora.TopLevelPresentation,
 ): Boolean = presentation == com.newoether.agora.TopLevelPresentation.CHAT &&
     snapshot.conversationId == currentConversationId &&
-    snapshot.isLoading && snapshot.isGenerating && !snapshot.isCompacting &&
+    snapshot.isLoading && snapshot.isGenerating &&
     snapshot.streamingMessage?.let { message ->
-        message.participant == Participant.MODEL &&
+        !message.isContextCompact() &&
+            message.participant == Participant.MODEL &&
             message.status == MessageStatus.SENDING && message.hasActiveAnswerSegment()
     } == true
 

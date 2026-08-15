@@ -3,42 +3,51 @@ package com.newoether.agora.model
 import com.newoether.agora.util.Constants
 
 /**
- * One user-visible generation: the nearest real USER input and the ordinary assistant messages
- * that follow it until the next real USER input. Run ids and runSequence are deliberately absent:
- * they are persistence/lifecycle metadata and are not message-boundary authority.
+ * One visible generation group.
+ *
+ * Every row participates in Run grouping. A real USER is always a hard boundary, while rows with
+ * one nonblank durable Run id remain indivisible. This policy locates Regenerate/UI scope only; it
+ * has no authority over Provider context assembly.
  */
 internal data class MessageGenerationBoundary(
-    val input: ChatMessage?,
-    val firstAssistant: ChatMessage?,
-    val lastAssistant: ChatMessage?,
-)
+    val messages: List<ChatMessage>,
+) {
+    val input: ChatMessage? =
+        messages.firstOrNull(MessageGenerationBoundaryResolver::isRealUser)
+    val firstAssistant: ChatMessage? =
+        messages.firstOrNull(MessageGenerationBoundaryResolver::isOrdinaryAssistant)
+    val lastAssistant: ChatMessage? =
+        messages.lastOrNull(MessageGenerationBoundaryResolver::isOrdinaryAssistant)
+}
 
 internal object MessageGenerationBoundaryResolver {
     fun resolve(visibleMessages: List<ChatMessage>): List<MessageGenerationBoundary> {
         val boundaries = mutableListOf<MessageGenerationBoundary>()
-        var input: ChatMessage? = null
-        var firstAssistant: ChatMessage? = null
-        var lastAssistant: ChatMessage? = null
+        val current = mutableListOf<ChatMessage>()
+        var currentRunId: String? = null
 
         fun finishBoundary() {
-            if (input != null || firstAssistant != null) {
-                boundaries += MessageGenerationBoundary(input, firstAssistant, lastAssistant)
+            if (current.isNotEmpty()) {
+                boundaries += MessageGenerationBoundary(current.toList())
+                current.clear()
+                currentRunId = null
             }
         }
 
         visibleMessages.distinctBy(ChatMessage::id).forEach { message ->
-            when {
-                isRealUser(message) -> {
-                    finishBoundary()
-                    input = message
-                    firstAssistant = null
-                    lastAssistant = null
-                }
-                isOrdinaryAssistant(message) -> {
-                    if (firstAssistant == null) firstAssistant = message
-                    lastAssistant = message
-                }
+            val messageRunId = message.runId.orEmpty().takeIf(String::isNotBlank)
+            if (isRealUser(message)) {
+                finishBoundary()
+            } else if (
+                current.isNotEmpty() &&
+                currentRunId != null &&
+                messageRunId != null &&
+                currentRunId != messageRunId
+            ) {
+                finishBoundary()
             }
+            current += message
+            if (currentRunId == null) currentRunId = messageRunId
         }
         finishBoundary()
         return boundaries
@@ -48,24 +57,7 @@ internal object MessageGenerationBoundaryResolver {
         visibleMessages: List<ChatMessage>,
         messageId: String,
     ): MessageGenerationBoundary? = resolve(visibleMessages).firstOrNull { boundary ->
-        boundary.input?.id == messageId ||
-            boundary.lastAssistant?.id == messageId
-    }
-
-    /** Cycle-safe structural lookup used to revalidate a UI boundary against a Room snapshot. */
-    fun nearestInputAncestorId(
-        allMessages: List<ChatMessage>,
-        messageId: String,
-    ): String? {
-        val byId = allMessages.distinctBy(ChatMessage::id).associateBy(ChatMessage::id)
-        var parentId = byId[messageId]?.parentId
-        val visited = hashSetOf<String>()
-        while (parentId != null && visited.add(parentId)) {
-            val parent = byId[parentId] ?: return null
-            if (isRealUser(parent)) return parent.id
-            parentId = parent.parentId
-        }
-        return null
+        boundary.messages.any { it.id == messageId }
     }
 
     fun isRealUser(message: ChatMessage): Boolean =

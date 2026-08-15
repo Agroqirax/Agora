@@ -1,0 +1,569 @@
+# Message Generation Architecture Contract
+
+Status: authoritative development contract, 2026-08-13.
+
+This document is required context for every Agora development task. It defines two global and
+orthogonal message contracts. Features such as Compact consume these contracts; they must not
+create parallel feature-specific definitions.
+
+All software behavior must conform to these contracts, including normal execution, concurrency,
+Room transactions, UI projection, errors, Stop/cancellation, recovery, automation, tools, queue
+handoff, and legacy compatibility. Conflicting old code, tests, or documentation must be corrected;
+they do not authorize a feature-local exception or parallel contract.
+
+Implementation should reuse the existing ordinary pipeline, concepts, state owners, and objects to
+the greatest practical extent. Robustness is the primary design objective: contract correctness,
+identity fencing, failure atomicity, deterministic recovery, and cancellation safety outrank
+cosmetic abstraction. Add an abstraction only for a cohesive invariant, a real side-effect
+boundary, or multiple genuine consumers.
+
+## 1. Terms and strict separation
+
+A **generation boundary** identifies the visible messages produced by one generation. It is used
+only to locate Regenerate scope and to decide ownership of per-generation status and bottom action
+controls.
+
+A **context boundary** identifies the oldest message included in one Provider request. It is used
+only by ordinary context/API-path assembly.
+
+The generation-boundary resolver must never select, truncate, reorder, or assemble Provider
+context. The context assembler must never infer UI action ownership or Regenerate range.
+
+## 2. Global generation-boundary contract
+
+1. Every real USER message starts a generation boundary, regardless of neighboring message types
+   or legacy Run identity.
+2. All messages produced inside one generation share one nonblank `runId`. A Run is one indivisible
+   generation group; no boundary may be created inside it.
+3. A change to a different nonblank `runId` starts a new generation group. Protocol rows,
+   Compact rows, and ordinary assistant rows all participate in this Run grouping.
+4. Every actual send/generation admission creates a fresh Run ID. It must never reactivate an old
+   Run. This includes the Send button, one claimed FIFO queue drain, automatic/manual Compact,
+   Recompact, and Regenerate. Provider passes and tool rounds that continue the same admitted
+   generation remain inside that generation's Run.
+5. Blank legacy Run IDs do not authorize destructive guessing. A real USER remains a hard boundary;
+   new writes must always use a nonblank fresh Run ID.
+
+`MessageGenerationBoundaryResolver` is the shared owner of this definition. Compact, Delete,
+Recompact, Regenerate, rendering, and status presentation may consume it but may not add local
+boundary exceptions.
+
+## 3. UI and Regenerate consequences
+
+- Every real USER message always owns its bottom action controls.
+- One Run group owns one generation status presentation.
+- The last ordinary assistant output in a Run group owns that group's assistant action controls.
+- Adjacent assistants from different Runs remain independently actionable even when an intervening
+  Compact is deleted.
+- Ordinary Regenerate targets only the selected generation group, creates a fresh Run, and does not
+  absorb an adjacent Run.
+- Same-position replacement is an output-target option, not a new generation contract. Recompact
+  creates a fresh Run and replaces only the selected Compact row at its existing message ID and
+  parent. It must not create a branch, clear suffix messages, rewrite descendants, or mutate any
+  other message.
+- Deleting a Compact deletes only that row and reparents only its direct message children to the
+  deleted row's former parent. It must not merge surviving generation groups.
+
+## 4. Global context-boundary contract
+
+For every ordinary Provider request:
+
+1. Start at the request's latest selected parent message.
+2. Walk upward through the durable `parentId` chain.
+3. The nearest Compact on that chain whose generation ended normally and without error
+   (`MessageStatus.SUCCESS`) is the context boundary.
+4. That successful Compact is the topmost context message. Older ancestors are excluded.
+5. Failed, stopped, in-flight, missing, or off-branch Compact rows are not context boundaries.
+6. If no successful Compact exists on the selected ancestor chain, context continues to the oldest
+   reachable ancestor.
+7. Provider projection may convert the successful Compact capsule into the established summary
+   input role, but it must preserve the boundary position and following message order.
+
+`GenerationApiPathBuilder` and the ordinary Provider message projection own this contract.
+Manual/automatic Compact and Recompact use this same ordinary path from their requested graph
+position. `MessageGenerationBoundaryResolver` has no role here.
+
+## 5. Shared generation lifecycle
+
+Compact is an ordinary generation with only the declared minimal differences: message identity and
+UI, haptic exclusion, selected model and generation parameters, tools disabled, Compact system
+prompt, and one frozen API-only Compact invocation. It reuses ordinary admission, fresh Run
+creation, context/API-path assembly, Provider execution, streaming/checkpoints, Stop/cancellation,
+terminal settlement, recovery, and queue release.
+
+The Compact invocation is appended by the shared pre-Provider request projection as the final USER
+message. It is request-only configuration: it participates in exact token accounting but is never
+written to Room, rendered as a visible message, assigned a Run boundary, or used to alter durable
+parentage. The configured Compact summary instructions remain the system prompt; the final USER
+turn only invokes that behavior. This guarantees a valid terminal input role even when the durable
+Compact parent is an Assistant message.
+
+After a durable tool result and a successful Compact, continuation priority is:
+
+`Compact SUCCESS -> FIFO queued user message -> loop`
+
+The queue claim/check and loop admission must remain linearized so guidance is neither duplicated
+nor lost. A non-successful or anomalous Compact is a hard automatic-handoff boundary: it starts
+neither queued generation nor loop generation.
+
+## 6. Review blockers
+
+A change is invalid if it:
+
+- uses generation boundaries to assemble Provider context;
+- uses context boundaries to merge UI generations or choose Regenerate scope;
+- reuses or reactivates a terminal Run for a new send/generation;
+- adds a Compact-specific boundary or generation lifecycle;
+- adds a Provider descriptor, capabilities/policy object, adapter layer, wrapper, interface, or
+  factory without a demonstrated cohesive invariant, real side-effect boundary, or multiple
+  genuine stable consumers and without removing an existing responsibility or duplication;
+- mutates suffix/neighbor messages during same-position replacement;
+- merges actions or status across different Run IDs;
+- treats a non-successful Compact as a context boundary.
+
+Focused tests must cover each rule, including legacy blank IDs, protocol rows, failed/stopped
+Compact rows, nearest-successful-ancestor selection, fresh-Run Recompact, suffix isolation, and
+concurrent queue-versus-loop admission.
+
+## 7. Module boundaries and responsibilities
+
+| Module | Owns | Must not own |
+|---|---|---|
+| `ChatMessage`, `RunEntity`, status/identity models | Durable vocabulary and small identity predicates. | UI grouping, context walks, orchestration, or side effects. |
+| `MessageGenerationBoundaryResolver` | Pure visible-range grouping for one generation by real USER and Run identity. | Context assembly, graph writes, branch mutation, Provider payloads, or Compact-specific rules. |
+| `RunUiProjection` | Pure action/status/branch-control presentation derived from generation boundaries. | Generation admission, context selection, or database mutation. |
+| `ConversationRuntimeReducer` + `ConversationGenerationState` + mailbox | The single in-process authority for one conversation's slot, accepted effects, Stop barriers, and stale-result rejection. | Provider protocol parsing, Room transaction bodies, or feature-specific context logic. |
+| `ConversationExecutionCoordinator` | Per-conversation execution serialization around admitted work. | A second Run state, queue ownership, or result acceptance. |
+| `GenerationRequestBuilder` | One immutable admission snapshot: selected model, Provider registry, generation parameters, tools/memory/attachment policy. | Provider execution or live settings reads after admission. |
+| `GenerationApiPathBuilder` | Read-only durable parent-chain walk, nearest-successful-Compact context boundary, Provider message projection input, and fixed Provider config. | UI generation boundaries, Run creation, queue policy, or writes. |
+| `StandardGenerationContinuationLauncher` | The ordinary fresh-Run graph transaction for a continuation and the optional same-row output target. | A Compact lifecycle, Provider implementation, context reconstruction, or old-Run restart. |
+| `BoundRunGenerationLauncher` | Binding one already-created fresh Run to the shared generation tail and identified callbacks. | Run graph creation, boundary inference, or terminal writes outside shared settlement. |
+| `GenerationManager` | Mailbox-authorized Provider/tool execution, streaming overlay/checkpoints, generic bounded final text projection, and terminal-effect request. | Branch selection, UI grouping, Compact policy, queue reordering, or independent lifecycle state. |
+| `GenerationTerminalSettlementController` and finalization executors | Identified terminal Room effects and two-barrier settlement integration. | Admission, context assembly, or action presentation. |
+| `ConversationRegenerationService` | Resolve one global generation boundary, revalidate it under the normal lock, and request a fresh ordinary generation branch. | Custom grouping, suffix-wide deletion, or context construction. |
+| `ConversationCompactController` | Adapt Compact model/config/system prompt/tool disablement, message identity/UI target, retained-summary text projection, and call the ordinary launcher. | A Provider runner, state machine, old-Run restart, custom context path, or custom queue lifecycle. |
+| `ContextCompactor` | Threshold/retention calculations and pure Compact text formatting helpers only. | Provider transport, streaming, settlement, Run ownership, or graph mutation. |
+| `ChatContextCompactDao` through the sole `ChatDao` | Atomic same-row fresh-Run substitution and target-only Compact deletion/necessary rewiring. | Context semantics, UI boundaries, Provider decisions, or broad graph reconstruction. |
+| queue guidance state + `queueMutationMutex` | FIFO ownership, claim revision, exact front requeue, and linearized queue-versus-loop admission. | Holding locks during Provider/network work or attaching guidance to an old Run. |
+
+Room remains the durable source of truth. The streaming overlay is a temporary projection of one
+durable message identity and cannot become a parallel message graph.
+
+## 8. Binding module behavior
+
+### 8.1 Ordinary Send and queue drain
+
+- One accepted Send creates one fresh Run, durable USER input, and MODEL placeholder atomically.
+- One claimed FIFO drain enters the same Send transaction and creates a fresh Run.
+- Input queued while another generation owns the slot stays memory-owned until a legal boundary.
+- Claim failure returns the exact batch to the front; durable success transfers ownership exactly
+  once. No item may be lost, duplicated, reordered, or attached to the terminal origin Run.
+- Normal completion and Stop settlement emit one shared process queue-drain signal. UI owner
+  detachment/rebinding may hand that signal off, but it cannot replace it with a Stop-only callback
+  or discard a pending FIFO batch.
+
+### 8.2 Regenerate
+
+- Locate scope only through `MessageGenerationBoundaryResolver`.
+- Revalidate the visible boundary against the durable graph while serialized.
+- The selected boundary's terminal ordinary assistant is the target; an adjacent different Run is
+  outside scope.
+- Ordinary Regenerate creates a fresh Run and branch using the boundary's real USER source, or the
+  first assistant's parent when no real USER is present.
+- It must not use the generation boundary to assemble Provider context. The ordinary API-path
+  builder does that from the new request parent.
+
+### 8.3 Recompact
+
+- Recompact is ordinary same-position regeneration with a Compact output target.
+- It creates a fresh Run and never reactivates the target's terminal Run.
+- The target message ID and parent stay fixed. Only the target row's generation-owned fields,
+  including its fresh Run identity, may change.
+- No new message branch or selected-message edge is created. Every suffix/descendant message row,
+  order, parent, content, status, model, and Run identity remains unchanged.
+- The old independently owned Compact Run is substituted atomically in the Run graph; failure rolls
+  the whole replacement back.
+
+### 8.4 Compact deletion
+
+- Delete exactly the selected Compact row.
+- Reparent only direct message children to the deleted row's former parent.
+- Preserve every other message field and never delete a suffix subtree.
+- Repair only selections and dedicated Run ancestry necessary to keep surviving graphs valid.
+- Surviving messages are still grouped by the global Run contract; deletion cannot merge Runs.
+
+### 8.5 Tool-result continuation priority
+
+After a durable tool result:
+
+1. evaluate and run automatic Compact;
+2. require that exact Compact message to settle durably with `MessageStatus.SUCCESS`;
+3. drain pending or already-claimed FIFO user guidance;
+4. admit the no-input loop only if neither exists.
+
+The final queue check and loop admission are one linearized decision. Compact settlement cannot
+clear the queue before this decision. ERROR, STOPPED, cancellation, setup/launch failure, missing
+message/status, stale identity, or any other Compact anomaly stops this automatic chain. Pending or
+claimed guidance remains owned and ordered but is not automatically invoked or cleared after that
+failure; only a later explicit user action may resume ordinary queue admission.
+
+### 8.6 Compact UI
+
+Compact may own a capsule renderer, message label/menu, haptic exclusion, and stable presentation.
+Its outer row height/padding and internal icon/text/action slots must remain stable across
+SENDING/THINKING/terminal/error transitions. UI specialization cannot redefine generation or
+context contracts.
+
+When the Compact detail Bottom Sheet is open and the ordinary durable message is
+SENDING/answering with no real Markdown output, it shows the localized equivalent of
+`Context compacting...` in the Material primary color. The placeholder enters and leaves with fade animations. Its shared
+empty-stream rendering receives an 8 dp internal top inset so the status line does not crowd the
+Bottom Sheet divider. As soon as real output exists, the placeholder fades out and the body renders
+normally.
+
+A terminal Compact error remains visible in both locations:
+
+- the detail Bottom Sheet places the shared neutral-gray generation error bar beside the Markdown
+  body;
+- the capsule retains its existing theme-derived error palette independently of the neutral terminal
+  bar, without changing its bounds, and shows an error icon plus the localized equivalent of
+  `Compact error`. Its container uses `errorContainer`, its icon uses `error`, and its text uses alpha-adjusted
+  `error`; saturated hard-coded red or a different error token is forbidden.
+
+A stopped Compact is a non-error terminal presentation. Its capsule keeps the same stable bounds,
+shows a stopped icon plus the localized equivalent of `Compact stopped`, and emits no Snackbar. A
+failed Compact may emit only the persisted ordinary generation error segment; generated answer/summary text is never
+an error channel. Missing error detail uses a localized short fallback.
+
+All app-owned Compact settings, delete/recompact actions, boundary messages, streaming/status chrome,
+and known preflight/launch failure reasons must resolve through Android resources in the current
+locale. Domain owners carry a semantic `CompactFailureReason`, an optional nonblank external detail,
+and the affected message identity; they do not manufacture user-facing English. One narrow
+presentation resolver is shared by the manual and automatic UI consumers. Nonblank Provider or
+persisted error detail remains verbatim diagnostic content and is never translated. Internal
+invariant/debug exceptions are not user-visible resources.
+
+Both terminal presentations derive from the ordinary durable message status/error fields. They do
+not own a Compact state machine or infer failure from missing text.
+
+### 8.7 Shared streaming Markdown UI
+
+Ordinary answer Markdown, Thinking Bottom Sheet Markdown, and Compact Bottom Sheet Markdown use one
+shared streaming Markdown message UI implementation. That implementation owns the existing
+incremental append-only scan, stable/live block split, off-main parsing, long-document update
+cadence, and stream-to-terminal renderer continuity. A caller must not keep a second streaming
+Markdown algorithm or switch to a different terminal renderer merely because streaming ended.
+
+The implementation is only a parameterized UI variant. Its allowed inputs include Markdown
+content, streaming state, render context, font/size/color, and a generic animated empty-stream
+presentation. Every live Markdown variant uses the same bounded, position-based trailing-glyph fade;
+a caller must not disable that fade merely to hide a surrounding answering-tail dot. The ordinary
+message list may own that separate dot, while Thinking and Compact Bottom Sheets omit it without
+changing Markdown rendering. Typography or placeholder differences must remain parameterized.
+
+Finalized Thinking Bottom Sheet Markdown is selectable in every rendering branch, including the
+virtualized single-segment long-document path. Selection uses the shared no-auto-scroll selection
+host so dragging handles never repositions the conversation. Active streaming content remains
+non-selectable; once that same renderer reaches terminal state, selection is enabled without
+switching Markdown implementations or disabling virtualization.
+
+Generation terminal presentation is not Markdown syntax or renderer state. One stateless shared text
+component renders the ordinary answer and detail-sheet error beside the shared Markdown
+implementation. It does not subscribe to or own generation lifecycle state.
+
+Typed `GenerationError` remains the domain boundary. Before chat generation or transcription
+persists a display error, one Android-resource-backed presenter resolves app-owned categories and
+known transport reasons in the current locale. Authentication, rate limit, server/network wrappers,
+SSE parse, incomplete stream, output truncation, request validation, cancellation, timeout,
+unexpected-error fallback, and tool/transcription/embedding wrappers are resource owned in every
+supported locale. Exact common transport details such as connection closed/refused/reset, unknown
+host, and TLS failure are matched case-insensitively and localized. Nonblank Provider/API/server/OS
+diagnostic detail remains verbatim inside the localized wrapper unless it is plain prose whose first
+lowercase Unicode letter can be title-cased safely; codes, URLs, JSON, and identifiers are not
+rewritten. A narrow render-time compatibility normalizer applies the same known-phrase and safe
+sentence-case rules to already-persisted strings without mutating Room data.
+
+Ordinary assistant messages render no general-purpose status row. Sending, Thinking, answering,
+terminal success/token usage, stopped, and failed labels must not reserve or render that legacy row.
+Generation ERROR and STOPPED render text only: no Surface/background, rounded outline, Info icon,
+icon gap, or inner container padding. Both use the exact Retry label tokens, `ChatType.body` and
+`onSurfaceVariant` at 0.55 alpha, but neither uses Retry's grapheme entrance or active white dot.
+ERROR remains full-line, multiline, and selectable with its nonblank detail; STOPPED remains a
+localized content-width label. Their existing contextual outer vertical separation remains, and
+their durable ERROR versus STOPPED semantics stay distinct. Compact capsule error/stopped chrome is
+independent and unchanged.
+
+The existing answer-tail breathing dot remains owned by the message list. The same shared dot visual
+fills only the pre-output gap: while ordinary generation is active and the message has no answer text
+and no visible Thought, Tool, or Transcription segment, it renders alone. When the first visible
+Thought, Tool, or Transcription segment changes that pre-output mode to hidden, the activity host
+retains the last non-hidden presentation through an exact 320 ms opacity exit instead of destroying
+it in the same frame. Retaining the last mode also prevents a terminating Retry from flashing back to
+the ordinary dot. A retry reserves the final
+layout footprint for the localized `Retrying n/m...` label and shared dot, then fades the label in by
+Unicode grapheme at 27 ms per grapheme, bounded to 225-600 ms, with a fast-start,
+slow-finish `LinearOutSlowInEasing` curve. The same breathing dot translates continuously along the
+measured text-caret position and settles 8 dp after the full label; it is not replaced by a second
+dot. The entrance plays only once for one fresh retry-indicator composition. Attempt/label updates
+inside that retry episode snap immediately to the complete new label and final dot position without
+replaying; leaving and later re-entering retry creates a fresh episode that may animate once.
+Reduced Motion always shows the complete label and final dot position immediately. The label remains
+ordinary Markdown body size and semi-transparent gray, and retry presentation never owns scrolling
+or attachment state.
+
+The compact Thinking card is content-width and left-aligned while collapsed, and fills the available
+message width while expanded. It must not use card-level `animateContentSize`: an explicit 400 ms
+width-only transition matches the existing 400 ms vertical expansion/collapse and animates between
+the measured localized header width plus a 12 dp anti-ellipsis allowance and parent maximum width
+with a fast-start, slow-finish `LinearOutSlowInEasing` curve. The collapsed target remains capped by
+the available parent width. The animated width belongs only to the card shell: leading header content
+and expanded content retain a stable target layout width, remain anchored at `Alignment.TopStart`,
+and are clipped/revealed by the shell instead of being squeezed, reflowed, or centered at intermediate
+widths. Reduced Motion snaps spatial width.
+
+The header uses an 18 dp corner radius, 12 dp start by 10 dp vertical padding, an 18 dp icon/loading
+slot, an 8 dp icon-title gap, and the accepted local 13 sp / 22 sp SemiBold title. The title row
+reserves one 8 dp gap plus one 18 dp trailing disclosure slot. The same single 18 dp
+`KeyboardArrowDown` is a Surface-local overlay, outside the unbounded/clipped content Row, so its
+layout box tracks the visible animated shell's end edge with an exact 8 dp end inset at every width.
+No second disclosure exists. That single vector rotates to -90 degrees for detail-sheet navigation,
+0 degrees while inline-collapsed, and 180 degrees while inline-expanded; spatial motion animates the
+rotation and Reduced Motion snaps it. If any Thought, Tool, or Transcription segment in the card is active, the header icon is the
+shared motion-aware 18 dp loading indicator with an exact 4 dp stroke. Loading, brain, tool, and image
+icon changes all remain targets of the existing Crossfade; no active/static icon change is abrupt.
+During an active Thought, only an absent/default `Thinking...` title becomes a once-per-second
+`Thinking for Ns...` label based on the latest live thought-duration snapshot. Provider titles,
+Tool/Transcription titles, and terminal duration summaries remain semantic. At every Provider-pass
+thought boundary, the runtime finishes authoritative thought timing and changes the in-memory live
+status from THINKING to SENDING before publishing that finished-duration snapshot. The UI ticker and
+loading state therefore stop at the same boundary as persisted duration; later terminal settlement
+must not make the displayed duration decrease.
+
+Answer Markdown and Thinking-segment Markdown use one presentation multiplier of exactly 1.1 for
+line height only. It applies to paragraph/body, ordered and unordered lists, tables, H1-H6,
+block/inline code, and both streaming plain-text fallbacks. Answer/Thinking Markdown font sizes and
+their source `ChatType` tokens remain unchanged; the multiplier belongs to the chat Markdown asset owner.
+
+User-message body text uses the dedicated `ChatType.userBody` token at 15 sp with its existing 22 sp
+line height; branch navigation and dropdown-menu typography are unchanged.
+
+A non-editing user bubble owns its action dropdown through long press. The separate action row below
+the bubble is absent; the branch selector remains independently visible. The existing Material menu
+style contains Copy, Edit, Select Text, Info, and Delete in that order and retains current availability
+rules. Select Text reuses the existing custom Thinking detail-sheet shell with title `Select Text` and
+renders only the raw user message text in the shared no-auto-scroll native selection host. Its raw
+content branch uses 12 dp top, 24 dp horizontal, and 32 dp bottom padding so text does not crowd the
+header divider. It does not include attachments.
+
+Thinking and Select Text share one reusable `SmoothBottomSheet` Compose shell. A small stable state
+type plus `rememberSmoothBottomSheetState` owns Hidden/Partial/Expanded values; the shell owns the
+edge-to-edge Dialog/Surface, 0/0.45/0.94 anchors, 0.9 damping and 350 stiffness snap spring,
+interruption, native dim curve, scrim/back dismissal, draggable handle/header, Reduced Motion snap,
+and nested-scroll collapse driven by a caller-provided content-at-top predicate. `SegmentDetailSheet`
+only owns selected-segment navigation, titles/back action, scroll/LazyList state, Markdown/tool/media,
+footer/error, and Select Text content. Extraction preserves the existing geometry, thresholds,
+motion, header/divider, and rendering. Material 3 Sources, image, settings, and composer sheets remain
+owned by `MotionAwareModalBottomSheet` and are not migrated.
+
+### 8.8 Empty output and automatic handoff
+
+Provider completion with no answer, thought, follow-up, guidance, or other successful output is an
+ordinary generation error. Terminal persistence must include a nonblank error value so every
+consumer can render the shared error bar.
+
+Every Compact Run success-gates all automatic handoff, not only the no-input loop and regardless of
+whether the caller is foreground UI, Task, or Loop. Its ordinary launcher installs the queue-release
+suppression before the generation Job can start. Durable
+SUCCESS removes exactly that Run's suppression before settlement, allowing the ordinary queue
+release and then the existing queue-before-loop decision. ERROR, STOPPED, cancellation, missing or
+still-active status, setup failure, launch failure, stale identity, and exceptions leave the
+suppression in place; settlement consumes it without starting another Provider request.
+
+Consecutive origin-Run and Compact-Run suppressions are counted. A single boolean is invalid because
+the origin release and very fast Compact completion can settle in either order and would otherwise
+consume each other's decision. Failure never clears, drops, duplicates, or reorders queued user
+input; it leaves that input pending for a later explicit user action.
+
+### 8.9 Provider-hosted output and OpenAI-compatible controls
+
+An official OpenAI Provider or a custom Provider selected as OpenAI-compatible, together with
+Responses API enabled, is sufficient to expose both `OpenAI Search` and `Service Tier` in the
+conversation UI. No model-name allowlist, capability-discovery request, local capability registry,
+or extra relay declaration may suppress those controls. This is a positive availability rule; it
+does not redefine any separately supported Service Tier surface outside Responses.
+
+The immutable generation snapshot freezes both choices. When OpenAI Search is enabled, the existing
+OpenAI-compatible Responses request includes the native `web_search` tool. When Service Tier is
+enabled, that same request includes the normalized selected `service_tier` value. The ordinary
+Provider owns request serialization; UI visibility must not create a second request path.
+
+OpenAI Responses reasoning summaries are public summary content, not raw chain-of-thought. When
+thinking is enabled on an official or custom OpenAI-compatible Responses transport, the request opts
+into the most detailed available summary with `reasoning.summary = auto`. Summary text deltas enter
+the ordinary `ThoughtChunk` path and therefore form normal durable thinking segments and thinking
+blocks. Deltas with the same `output_index` and `summary_index` remain contiguous; a change in either
+index inserts exactly one blank line between summary parts. Bold text or a Markdown heading in the
+current summary part supplies the thinking-card title with its marker removed, matching Gemini.
+Disabling thinking suppresses both the summary request and its presentation.
+
+Provider-hosted tools use non-executing hosted-tool stream events. They may create and settle durable
+ordinary tool segments, but they cannot authorize local execution, enter the tool-effect reducer, or
+fabricate a tool-result continuation round. Whether a durable hosted segment is presented is an
+independent UI policy. Provider semantic termination still owns whether the request succeeded; Stop
+and errors use the shared generation settlement.
+
+Structured Provider citations follow [citations.md](citations.md). Protocol routers emit structured
+citation events rather than answer `TextChunk` or tool events. The existing streaming segment
+overlay and bounded checkpoint/terminal persistence retain accepted citation segments for the
+identified Run, while Provider history and token/context projection exclude them. Citations do not
+create a second generation lifecycle, change semantic termination, or append synthetic source text
+to the durable answer.
+
+A message card with visible tool segments but no real `thought` segment displays only
+`Called x tools`. Message-level thought duration is a fallback only when at least one thought segment
+exists; it must not turn a tool-only card into `Thought for xs, called x tools`.
+Gemini keeps its hosted output protocol-local. Candidate `groundingMetadata` becomes a completed,
+durable `google_search` hosted block with normalized `results` and full grounding metadata. The shared
+UI segment-preparation boundary excludes that exact tool name from compact, grouped timeline,
+ordinary timeline, and thinking-detail presentation, so it produces neither a `Google Search` card
+nor a `Called x tools` count; generic `web_search`, OpenAI `openai_search`, and other tools remain
+visible. This presentation rule does not change request serialization, hosted-tool settlement,
+persistence, replay, citation extraction, source order, or failure behavior. An `executableCode` part
+starts a visible `code_execution` block displayed as `Code Execution`; the matching
+`codeExecutionResult` completes that same block. Code and output are not duplicated into answer text.
+Persisted Code Execution segments replay to later Gemini requests as typed executable-code and
+code-execution-result model parts in their original order. Multiple pairs remain ordered, and an
+unmatched executable-code part leaves a tool in flight so semantic termination fails closed.
+
+If the official service, selected model, or compatible relay rejects `web_search`,
+`service_tier`, reasoning summary, or the Responses request itself, that failure is an ordinary
+generation error. Persist the provider's bounded error text and render it through the existing red
+error bar. Do not silently retry without the parameter, fall back to Chat Completions or generic Web
+Search, auto-disable a setting, show the generated response as an error, or use a Snackbar-only or
+parallel error presentation.
+
+### 8.10 Provider reuse and mandatory minimum-abstraction rule
+
+Official endpoints and compatible relays reuse the existing Provider implementation selected by the
+wire protocol. A relay carrying Claude or Gemini models through an OpenAI-compatible wire contract
+uses the OpenAI path; model branding must not select a second lifecycle or an Anthropic/Gemini
+transport. Endpoint, authentication, and proven compatibility differences should remain constructor
+parameters, existing configuration fields, or narrow overrides whenever those mechanisms are
+sufficient.
+
+Provider work must not create a general object model merely to make OpenAI, Anthropic, and Gemini
+look structurally identical. Their request encoding, authentication, stream state machine,
+signature/history replay, and terminal proof may remain direct protocol-local code. Reuse is
+required at the existing generation lifecycle, semantic `StreamEvent`, message/tool projection, and
+proven shared utility boundaries; wire-level uniformity is not a goal.
+
+The following are binding review blockers:
+
+- Do not add `ProviderDescriptor`, `ProviderCapabilities`, transport/policy/strategy objects,
+  adapter layers, wrapper configs, factories, or interfaces by default. A proposed name or diagram
+  is not evidence that an abstraction is needed.
+- Do not move existing booleans or fields into a new data object merely to make the configuration
+  appear cleaner. One owner and one consumer should normally remain a direct field, parameter, or
+  protocol-local condition.
+- A new object or interface is allowed only when the task record and review identify a cohesive
+  invariant it owns, a real external/transactional side-effect boundary it isolates, or multiple
+  genuine stable consumers. They must also state why the existing owner plus parameters is unsafe or
+  insufficient and which existing responsibility or duplication will be removed.
+- A refactor that only adds indirection, pass-through calls, mirrored types, mapping layers, or
+  speculative extension points is invalid. Net object growth requires an explicit reduction in
+  ownership ambiguity, duplicated behavior, or failure surface.
+- Capability handling should stay as the smallest direct check in the owning Provider/configuration
+  path until several real features need the exact same rule. Unknown relay behavior fails closed;
+  that alone does not justify a capability framework.
+
+## 9. Context assembly contract in module terms
+
+`GenerationApiPathBuilder` receives one immutable durable snapshot and a requested parent ID. It
+walks only that parent chain, stops at the first successful Compact encountered upward, expands
+protocol side chains without duplication, and projects Room entities once. The shared immediate
+pre-Provider projection then applies image/user-template transforms and appends an optional frozen
+API-only initial USER prompt. For Compact that prompt is mandatory and therefore the final request
+item is USER even when the durable parent is Assistant; ordinary requests without such a configured
+prompt remain unchanged.
+
+The API-only USER prompt is counted as fixed request cost so threshold and rollout accounting cannot
+omit bytes that dispatch sends. It is appended only to the initial Provider request and is not part
+of retained-message calculation, Room history, generation-boundary grouping, or later tool rounds.
+
+A Compact preflight may call this read-only ordinary builder to calculate retained-summary text.
+That projection is not authoritative input for execution and cannot replace or suppress the
+ordinary Provider request rebuild inside the shared generation tail.
+
+A branch-selection change, missing parent, or corrupt chain must fail closed or produce only the
+reachable safe prefix. It must never jump to a Compact on another branch.
+
+## 10. Concurrency and failure-safety principles
+
+1. **Single process authority.** Only the conversation mailbox/reducer accepts lifecycle
+   transitions. Controllers execute accepted effects; they do not maintain shadow state.
+2. **One durable live Run.** The Room active-slot constraint and transactional preconditions are
+   mandatory. A fresh Run is inserted only when no other live Run exists.
+3. **Fresh identity per admission.** Run IDs are generated before the durable transaction and never
+   reused to restart terminal work.
+4. **Identity fencing.** Asynchronous Provider, tool, checkpoint, Stop, and finalization results are
+   accepted only for the expected conversation, owner token, Run, pass, and effect ID.
+5. **Durable-before-external.** Provider execution begins only after the Run/message graph commits
+   and the process state binds that exact Run.
+6. **Terminal-before-handoff.** Compact, queue, or loop continuation starts only after the origin
+   Run's legal terminal boundary. Checkpoint writers close before terminal persistence.
+7. **Short lock scope.** Queue mutexes and graph/selection locks protect only decisions and
+   transactions; never hold them across Provider streams, tool execution, or UI waits.
+8. **Revalidation.** UI-derived targets, parent links, terminal status, Run ownership, and selected
+   edges are re-read inside the serialized/transactional boundary.
+9. **Atomic replacement.** Same-row fresh-Run substitution either updates the target and Run graph
+   completely or changes nothing. Non-target message rows are immutable inputs.
+10. **Cancellation robustness.** Cancellation cannot strand a SENDING row, lose a claimed queue
+    lease, reopen a terminal Run, or bypass both coroutine and durable settlement barriers. A Stop
+    persistence failure keeps the slot occupied; only after that exact failure is recorded may a
+    later Stop reissue the same finalization effect identity. Concurrent duplicates and stale
+    identities remain rejected. If cancellation or failure is delivered at a suspending Run-graph
+    commit boundary, the owner must re-read the exact proposed Run before treating the transaction
+    as uncommitted or allowing the process slot to release.
+11. **Bounded persistence.** Final transforms may change only declared presentation text and the
+    shared persistence guard is reapplied afterward.
+12. **Fail closed.** Missing/cyclic parents, shared legacy Runs that cannot be substituted safely,
+    selection drift, stale identity, and partial transaction results reject the operation rather
+    than guessing or broadening mutation scope.
+
+## 11. Abstraction and growth principles
+
+- Prefer an existing ordinary owner over a new feature layer. Configuration data and target
+  parameters are preferred to another controller/state machine.
+- Keep a rule pure when it is pure. Boundary and presentation policies should be deterministic
+  functions with focused tests.
+- Extract a module only when it owns a cohesive invariant, a real external/transactional side
+  effect boundary, or multiple genuine consumers. Do not create pass-through wrappers, type
+  aliases, one-call factories, or speculative interfaces.
+- Conversely, do not let a simple owner grow into unrelated responsibilities. If a file starts
+  mixing admission, context, Provider execution, persistence, and UI policy, split along the
+  ownership table above rather than by arbitrary line count.
+- Durable fields such as `parentId`, `runId`, status, and selected edges drive generic policy.
+  Message prefixes may identify presentation/protocol types but must not create parallel lifecycle
+  semantics.
+- Compatibility handling belongs at the narrow read/transaction boundary and must not pollute the
+  normal path. New writes obey current contracts; unsafe legacy states fail closed.
+- Comments explain ownership and invariants, not a second algorithm. Tests assert observable
+  contracts, not source spelling.
+- No architecture claim is complete until focused concurrency/failure tests, both flavor unit
+  suites, the project source-size/architecture gates, and the required build succeed.
+
+## 12. Required verification ownership
+
+| Contract | Minimum focused proof |
+|---|---|
+| Generation grouping | Real USER hard boundaries; same-Run protocol/assistant rows remain one group; every Run transition separates groups; blank legacy IDs are safe. |
+| Action/status projection | Every real USER has actions; only each Run group's terminal ordinary assistant has assistant actions/status; different Runs remain separate. |
+| Fresh-Run admission | Send, queue drain, Compact, Recompact, and Regenerate never restart a terminal Run. |
+| Context boundary | Parent-chain nearest successful Compact wins; closer ERROR/STOPPED/SENDING Compact is ignored; off-branch Compact is unreachable. |
+| Recompact isolation | Same message ID/parent, fresh Run, unchanged selections and byte-for-byte unchanged non-target message rows/suffix. |
+| Delete isolation | Target-only delete, direct-child reparent, unchanged surviving rows, independent Run presentation. |
+| Priority | Only Compact SUCCESS permits handoff; then pending and already-claimed queue guidance beat loop and the no-guidance path admits loop once. ERROR/STOPPED/cancellation/anomaly starts neither. |
+| Request terminal role | Compact dispatch appends one non-durable initial USER invocation after an Assistant or tool-result parent; provider-visible input ends USER and fixed token accounting includes it. |
+| Provider-hosted output | OpenAI-compatible Responses requests serialize enabled `web_search`, selected `service_tier`, and reasoning summaries; summary indices preserve part boundaries and headings supply titles; OpenAI Search and Gemini Google Search/Code Execution settle display-only tool blocks without local execution; Gemini Code Execution replays typed parts and fails closed when a result is missing. |
+| Races and failures | Stop before/after bind, consecutive origin/Compact release suppressions in both settlement orders, selection drift, missing target/status, transaction rollback, stale callbacks, checkpoint-versus-terminal ordering, and queue claim failure. |
+| UI stability | Compact row/pill vertical bounds do not change across progress and terminal content; entrance is draw-only and does not alter apparent vertical spacing; error colors match the shared error bar theme tokens and alpha. |

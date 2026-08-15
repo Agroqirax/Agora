@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.ui.common.AgoraHaptics
 import com.newoether.agora.viewmodel.ChatViewModel
 
@@ -94,6 +95,10 @@ internal fun ChatAppDialogHost(
     state.renameConversationId?.let { id ->
         ChatRenameDialog(
             initialName = state.renameInitialName,
+            initialDisplayName = replaceCustomProviderIdsForDisplay(
+                state.renameInitialName,
+                customProviders,
+            ),
             onSave = { newName ->
                 viewModel.renameConversation(id, newName)
                 state.dismissRename()

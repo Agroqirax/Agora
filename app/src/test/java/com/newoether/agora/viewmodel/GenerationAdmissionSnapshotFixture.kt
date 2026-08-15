@@ -13,25 +13,27 @@ internal fun testGenerationAdmissionSnapshot(
     val providerName = selectedModelId.substringBefore(':')
     val provider = mockk<LlmProvider>()
     val context = GenerationContext(conversationId = conversationId)
+    val config = GenerationConfig(
+        providerName = providerName,
+        modelId = selectedModelId.substringAfter(':'),
+        apiKey = apiKey,
+        effectiveSystemPrompt = "system",
+        maxContextWindow = contextWindow,
+        codeExecutionEnabled = false,
+        googleSearchEnabled = false,
+        thinkingEnabled = false,
+        baseUrl = "https://provider.invalid",
+    )
     return GenerationAdmissionSnapshot(
         conversationId = conversationId,
         runId = runId,
         selectedModelId = selectedModelId,
-        config = GenerationConfig(
-            providerName = providerName,
-            modelId = selectedModelId.substringAfter(':'),
-            apiKey = apiKey,
-            effectiveSystemPrompt = "system",
-            maxContextWindow = contextWindow,
-            codeExecutionEnabled = false,
-            googleSearchEnabled = false,
-            thinkingEnabled = false,
-            baseUrl = "https://provider.invalid",
-        ),
+        config = config,
         providerInstances = mapOf(providerName to provider),
         context = context,
         automaticCompact = AutomaticCompactConfig(
             enabled = true,
+            thresholdPercent = 90,
             request = CompactRequest(
                 model = selectedModelId,
                 prompt = "compact prompt",
@@ -42,6 +44,8 @@ internal fun testGenerationAdmissionSnapshot(
             baseUrl = "https://provider.invalid",
             provider = provider,
             configured = true,
+            generationConfig = config,
+            providerInstances = mapOf(providerName to provider),
             generationContext = context,
         ),
         titleGenerationEnabled = true,

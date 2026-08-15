@@ -14,6 +14,7 @@ import com.newoether.agora.data.EmbeddingCacheLocks
 import com.newoether.agora.data.EmbeddingModelType
 import com.newoether.agora.data.EmbeddingIndexer
 import com.newoether.agora.data.SettingsManager
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.EmbeddingEntity
 import com.newoether.agora.util.Constants
@@ -60,7 +61,11 @@ class EmbeddingCacheWorker(
         // Container singletons, NOT fresh instances: a second Room instance on the same
         // file bypasses the app's invalidation tracker (UI Flows would go stale), and a
         // second DataStore on the same file throws "multiple DataStores active".
-        val container = (applicationContext as AgoraApplication).container
+        val container = (applicationContext as AgoraApplication)
+            .awaitContainer()
+            ?: return@withContext Result.failure(
+                workDataOf("error" to "Database unavailable"),
+            )
 
         // Same process-wide lock as RagManager's in-app runner: never compute alongside it.
         EmbeddingCacheLocks.forModel(modelId).withLock {
@@ -159,8 +164,12 @@ class EmbeddingCacheWorker(
             }
         } catch (e: Exception) {
             DebugLog.e(TAG, "Cache worker failed", e)
+            val displayError = replaceCustomProviderIdsForDisplay(
+                e.localizedMessage ?: "Unknown error",
+                settingsManager.customProviders.first(),
+            )
             return Result.failure(Data.Builder()
-                .putString("error", e.localizedMessage ?: "Unknown error").build())
+                .putString("error", displayError).build())
         }
 
         val failed = attempted - succeeded

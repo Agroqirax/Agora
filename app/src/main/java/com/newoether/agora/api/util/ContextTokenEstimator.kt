@@ -29,8 +29,15 @@ object ContextTokenEstimator {
     }
 
     /** Provider-visible cost that exists even when the conversation history is empty. */
-    fun estimateFixed(systemPrompt: String?, tools: List<ToolDefinition>): Int {
+    fun estimateFixed(
+        systemPrompt: String?,
+        tools: List<ToolDefinition>,
+        initialUserPrompt: String? = null,
+    ): Int {
         var raw = MESSAGE_OVERHEAD.toLong() + estimateTextRaw(systemPrompt.orEmpty())
+        initialUserPrompt?.takeIf(String::isNotBlank)?.let { prompt ->
+            raw += MESSAGE_OVERHEAD + estimateTextRaw(prompt)
+        }
         tools.forEach { tool ->
             raw += TOOL_CALL_OVERHEAD
             raw += estimateTextRaw(tool.type)

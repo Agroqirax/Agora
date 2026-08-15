@@ -1,6 +1,8 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationPolicy
+import com.newoether.agora.model.CitationRecord
 import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
@@ -47,6 +49,9 @@ internal class GenerationThoughtTiming(
     }
 }
 
+internal fun statusAfterThoughtPhaseFinished(status: MessageStatus): MessageStatus =
+    if (status == MessageStatus.THINKING) MessageStatus.SENDING else status
+
 internal fun appendMergedSegment(
     target: MutableList<MessageSegment>,
     segment: MessageSegment,
@@ -74,6 +79,27 @@ internal fun appendMergedSegment(
     }
 }
 
+internal fun rebaseCitationForFinalAnswer(
+    citation: CitationRecord,
+    providerAnswerStart: Int,
+    finalAnswer: String,
+): CitationRecord {
+    if (citation.anchors.isEmpty()) return citation
+    val shifted = citation.copy(
+        anchors = citation.anchors.mapNotNull { anchor ->
+            val start = providerAnswerStart.toLong() + anchor.startIndex
+            val end = providerAnswerStart.toLong() + anchor.endIndex
+            if (start !in 0..Int.MAX_VALUE.toLong() || end !in 0..Int.MAX_VALUE.toLong()) {
+                null
+            } else {
+                anchor.copy(startIndex = start.toInt(), endIndex = end.toInt())
+            }
+        },
+    )
+    return CitationPolicy.normalize(shifted, finalAnswer)
+        ?: citation.copy(anchors = emptyList())
+}
+
 private fun mergeDurationMs(first: Long?, second: Long?): Long? {
     val merged = (first ?: 0L) + (second ?: 0L)
     return merged.takeIf { it > 0L }
@@ -88,7 +114,8 @@ internal fun buildLiveSegments(
     thoughtDurationMs: Long? = null,
     errorMessage: String? = null,
 ): List<MessageSegment>? {
-    val result = flushed.toMutableList()
+    val citations = flushed.filter { it.type == "citation" }
+    val result = flushed.filterTo(mutableListOf()) { it.type != "citation" }
     if (answer.isNotEmpty()) {
         appendMergedSegment(result, MessageSegment(type = "answer", content = answer.toString()))
     }
@@ -107,8 +134,25 @@ internal fun buildLiveSegments(
     errorMessage?.takeIf { it.isNotBlank() }?.let { error ->
         result.add(MessageSegment(type = "error", content = error))
     }
+    result.addAll(citations)
     return result.ifEmpty { null }
 }
+
+internal fun terminalGenerationErrorMessage(
+    status: MessageStatus,
+    currentError: String?,
+    fallbackError: String,
+): String? = if (status == MessageStatus.ERROR) {
+    currentError?.takeIf(String::isNotBlank) ?: fallbackError
+} else {
+    currentError
+}
+
+internal fun ChatMessage.withBoundedFinalTextTransform(
+    transform: (String, MessageStatus) -> String,
+): ChatMessage = copy(
+    text = MessagePersistenceGuard.clipText(transform(text, status)),
+)
 
 internal data class GenerationFinalSnapshot(
     val messageId: String,

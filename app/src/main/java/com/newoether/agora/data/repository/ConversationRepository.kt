@@ -4,6 +4,7 @@ import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.ConversationDraftAttachmentReference
 import com.newoether.agora.data.local.EmbeddingEntity
+import com.newoether.agora.data.local.EmbeddingSearchRow
 import com.newoether.agora.data.local.IndexableMessage
 import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
@@ -21,6 +22,8 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.model.SelectedAttachment
+import com.newoether.agora.model.citationRecords
+import com.newoether.agora.model.matchesCitationTitle
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +37,46 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+internal fun MessageEntity.matchesCitationTitle(query: String): Boolean {
+    val segments = toolCallJson?.let { raw ->
+        runCatching { Json.decodeFromString<List<MessageSegment>>(raw) }.getOrNull()
+    }.orEmpty()
+    return segments.citationRecords(text).matchesCitationTitle(query)
+}
+
+private val citationSearchNewestFirst =
+    compareByDescending<MessageEntity>(MessageEntity::timestamp).thenByDescending(MessageEntity::id)
+
+internal suspend fun boundedCitationTitleMatches(
+    query: String,
+    limit: Int,
+    pageSize: Int = 128,
+    loadPage: suspend (afterId: String, pageSize: Int) -> List<MessageEntity>,
+): List<MessageEntity> {
+    if (query.isBlank() || limit <= 0) return emptyList()
+    val boundedPageSize = pageSize.coerceIn(1, 256)
+    val newestMatches = mutableListOf<MessageEntity>()
+    var afterId = ""
+    while (true) {
+        val page = loadPage(afterId, boundedPageSize)
+        if (page.isEmpty()) break
+        page.asSequence()
+            .filter { it.id > afterId && it.matchesCitationTitle(query) }
+            .forEach { candidate ->
+                if (newestMatches.none { it.id == candidate.id }) {
+                    newestMatches += candidate
+                    newestMatches.sortWith(citationSearchNewestFirst)
+                    if (newestMatches.size > limit) newestMatches.removeAt(newestMatches.lastIndex)
+                }
+            }
+        val nextAfterId = page.maxOf(MessageEntity::id)
+        if (nextAfterId <= afterId) break
+        afterId = nextAfterId
+        if (page.size < boundedPageSize) break
+    }
+    return newestMatches
+}
 
 class ConversationRepository(
     private val chatDao: ChatDao
@@ -321,6 +364,8 @@ class ConversationRepository(
                     toolResult = it.result,
                     signature = it.signature,
                     toolCallId = it.toolCallId,
+                    responseOutputItems = it.responseOutputItems,
+                    responseOutputItemProvider = it.responseOutputItemProvider,
                 )
             )
         }
@@ -345,10 +390,12 @@ class ConversationRepository(
     suspend fun deleteMessagesByIds(ids: List<String>) = chatDao.deleteMessagesByIds(ids)
 
     suspend fun beginRecompactContextCompact(
+        replacementRun: RunEntity,
         messageId: String,
         modelName: String,
         expectedSelections: Map<String?, String>,
     ): MessageEntity = chatDao.beginRecompactContextCompact(
+        replacementRun = replacementRun,
         messageId = messageId,
         modelName = modelName,
         expectedSelectedBranchesJson = Json.encodeToString(
@@ -356,69 +403,6 @@ class ConversationRepository(
         ),
     )
 
-    suspend fun beginManualContextCompact(
-        run: RunEntity,
-        message: MessageEntity,
-        expectedSelections: Map<String?, String>,
-        selections: Map<String?, String>,
-        at: Long = System.currentTimeMillis(),
-    ): MessageEntity = chatDao.beginManualContextCompact(
-        run = run,
-        message = message,
-        expectedSelectedBranchesJson = Json.encodeToString(
-            expectedSelections.mapKeys { it.key ?: "null" },
-        ),
-        selectedBranchesJson = Json.encodeToString(selections.mapKeys { it.key ?: "null" }),
-        at = at,
-    )
-
-    suspend fun updateContextCompactCheckpoint(
-        messageId: String,
-        runId: String,
-        expectedPass: Int?,
-        text: String,
-    ): Boolean = chatDao.updateContextCompactCheckpoint(
-        messageId = messageId,
-        runId = runId,
-        expectedPass = expectedPass,
-        text = MessagePersistenceGuard.clipText(text),
-    ) == 1
-
-    suspend fun updateRecompactCheckpoint(
-        messageId: String,
-        text: String,
-    ): Boolean = chatDao.updateRecompactCheckpoint(
-        messageId = messageId,
-        text = MessagePersistenceGuard.clipText(text),
-    ) == 1
-
-    suspend fun settleRecompactMessage(
-        messageId: String,
-        text: String,
-        status: MessageStatus,
-    ): Boolean = chatDao.settleRecompactMessage(
-        messageId = messageId,
-        text = MessagePersistenceGuard.clipText(text),
-        status = status,
-    ) == 1
-
-    suspend fun settleManualContextCompact(
-        messageId: String,
-        runId: String,
-        text: String,
-        messageStatus: MessageStatus,
-        runStatus: RunStatus,
-        reason: RunEndReason,
-        at: Long = System.currentTimeMillis(),
-    ): Boolean = chatDao.settleManualContextCompact(
-        messageId = messageId,
-        runId = runId,
-        text = text,
-        messageStatus = messageStatus,
-        runStatus = runStatus,
-        reason = reason,
-        at = at,
-    )
 
     suspend fun removeContextCompact(messageId: String): Boolean = chatDao.removeContextCompact(messageId)
 
@@ -573,8 +557,17 @@ class ConversationRepository(
     suspend fun findExistingMessageIds(ids: List<String>): List<String> =
         chatDao.findExistingMessageIds(ids)
 
-    suspend fun getEmbeddingsByModel(modelId: String): List<EmbeddingEntity> =
-        chatDao.getEmbeddingsByModel(modelId)
+    suspend fun getEmbeddingSearchPage(
+        modelId: String,
+        afterId: Long,
+        minimumTextLength: Int,
+        limit: Int,
+    ): List<EmbeddingSearchRow> = chatDao.getEmbeddingSearchPage(
+        modelId = modelId,
+        afterId = afterId,
+        minimumTextLength = minimumTextLength,
+        limit = limit,
+    )
 
     suspend fun deleteEmbedding(messageId: String) =
         chatDao.deleteEmbedding(messageId)
@@ -594,8 +587,17 @@ class ConversationRepository(
 
     // ── Search ────────────────────────────────────────────────
 
-    suspend fun searchMessages(query: String, limit: Int = 10): List<MessageEntity> =
-        chatDao.searchMessages(escapeLikePattern(query), limit)
+    suspend fun searchMessages(query: String, limit: Int = 10): List<MessageEntity> {
+        if (limit <= 0) return emptyList()
+        val directMatches = chatDao.searchMessages(escapeLikePattern(query), limit)
+        val citationMatches = boundedCitationTitleMatches(query, limit) { afterId, pageSize ->
+            chatDao.getMessagesWithCitationSegmentsPage(afterId, pageSize)
+        }
+        return (directMatches + citationMatches)
+            .distinctBy(MessageEntity::id)
+            .sortedWith(citationSearchNewestFirst)
+            .take(limit)
+    }
 
     /** Escapes LIKE wildcards so a literal "%"/"_" in the user's query matches itself
      *  instead of matching everything (paired with ESCAPE '\' in the DAO query). */

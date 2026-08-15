@@ -15,6 +15,9 @@ object OpenAiServiceTiers {
 
     fun tierForIndex(index: Int): String = values[index.coerceIn(values.indices)]
 
-    fun requestValue(enabled: Boolean, value: String?): String? =
-        normalize(value).takeIf { enabled }
+    fun requestValue(
+        enabled: Boolean,
+        value: String?,
+        responsesApiEnabled: Boolean,
+    ): String? = normalize(value).takeIf { enabled && responsesApiEnabled }
 }

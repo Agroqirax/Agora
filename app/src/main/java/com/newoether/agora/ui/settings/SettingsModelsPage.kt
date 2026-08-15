@@ -38,7 +38,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.modelAliasDisplayName
+import com.newoether.agora.data.modelApiDisplayName
 import com.newoether.agora.data.providerDisplayName
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.components.clearFocusOnTap
@@ -54,9 +57,9 @@ private val FullRounded   = RoundedCornerShape(24.dp)
 private val TopRounded    = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 5.dp, bottomEnd = 5.dp)
 private val BottomRounded = RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
 private val MidRounded    = RoundedCornerShape(5.dp)
-private val FlatShape     = RoundedCornerShape(0.dp)
-private val FlatToBottom  = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
-private val FiveBottom    = RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp)
+internal val FlatShape     = RoundedCornerShape(0.dp)
+internal val FlatToBottom  = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+internal val FiveBottom    = RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5.dp)
 
 private val RemoteModelProviders = listOf(
     Constants.PROVIDER_GOOGLE,
@@ -144,6 +147,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var customModelProvider by rememberSaveable { mutableStateOf("") }
     var customModelId by rememberSaveable { mutableStateOf("") }
     var customModelAlias by rememberSaveable { mutableStateOf("") }
+    var customModelRawAlias by rememberSaveable { mutableStateOf("") }
     var customModelProviderMenuExpanded by remember { mutableStateOf(false) }
     var modelSearchQuery by rememberSaveable { mutableStateOf("") }
     val expandedProviders = remember { mutableStateMapOf<String, MutableTransitionState<Boolean>>() }
@@ -233,13 +237,16 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             }
 
             item(key = "default_model") {
-                val activeAlias = modelAliases[selectedModel]
                 val activeParsed = com.newoether.agora.model.ModelId.parse(selectedModel)
                 val providerName = providerDisplayName(
                     activeParsed.providerName,
                     customProviders,
                 )
-                val activeDisplayName = activeAlias ?: activeParsed.apiModelName
+                val activeDisplayName = modelAliasDisplayName(
+                    selectedModel,
+                    modelAliases,
+                    customProviders,
+                )
                 val activeIconRes = providerIcon(providerName)
                 val isActiveLocal = providerName.equals(Constants.PROVIDER_LOCAL, ignoreCase = true)
                 val hasEnabledModels = enabledModels.isNotEmpty()
@@ -320,7 +327,11 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             customProviders,
                         )
                         customModelId = parsed.modelName
-                        customModelAlias = modelAliases[model].orEmpty()
+                        customModelRawAlias = modelAliases[model].orEmpty()
+                        customModelAlias = replaceCustomProviderIdsForDisplay(
+                            customModelRawAlias,
+                            customProviders,
+                        )
                         showCustomModelDialog = true
                     },
                     onEnabledChange = { model, enabled ->
@@ -339,6 +350,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             editingCustomModel = null
                             customModelId = ""
                             customModelAlias = ""
+                            customModelRawAlias = ""
                             if (customModelProvider !in providerChoices) {
                                 customModelProvider = providerChoices.firstOrNull().orEmpty()
                             }
@@ -467,9 +479,12 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
                     items(enabledModels.toList(), key = { it }) { model ->
-                        val alias = modelAliases[model]
                         val parsed = com.newoether.agora.model.ModelId.parse(model)
-                        val displayName = alias ?: parsed.apiModelName
+                        val displayName = modelAliasDisplayName(
+                            model,
+                            modelAliases,
+                            customProviders,
+                        )
                         val providerName = providerDisplayName(
                             parsed.providerName,
                             customProviders,
@@ -509,6 +524,17 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         val normalizedProvider = customModelProvider.trim()
         val normalizedModelId = customModelId.trim()
         val normalizedAlias = customModelAlias.trim()
+        val unchangedDisplayAlias = replaceCustomProviderIdsForDisplay(
+            customModelRawAlias,
+            customProviders,
+        ).trim()
+        val aliasToPersist = if (
+            originalModelId != null && normalizedAlias == unchangedDisplayAlias
+        ) {
+            customModelRawAlias.trim()
+        } else {
+            normalizedAlias
+        }
         val pendingModelId = if (
             normalizedProvider.isNotEmpty() &&
             normalizedModelId.isNotEmpty()
@@ -683,14 +709,14 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 viewModel.settings.addCustomModel(
                                     provider = normalizedProvider,
                                     modelName = normalizedModelId,
-                                    alias = normalizedAlias,
+                                    alias = aliasToPersist,
                                 )
                             } else {
                                 viewModel.updateCustomModel(
                                     oldModelId = originalModelId,
                                     provider = normalizedProvider,
                                     modelId = normalizedModelId,
-                                    alias = normalizedAlias,
+                                    alias = aliasToPersist,
                                 )
                             }
                             customModelProviderMenuExpanded = false
@@ -713,8 +739,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     }
 
     deletingCustomModel?.let { model ->
-        val parsed = ModelId.parse(model)
-        val displayName = modelAliases[model] ?: parsed.apiModelName
+        val displayName = modelAliasDisplayName(model, modelAliases, customProviders)
         AlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { deletingCustomModel = null },
@@ -755,7 +780,9 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     // ── Model Alias Dialog ──
     showModelAliasDialog?.let { model ->
-        val aliasState = rememberTextFieldState(modelAliases[model] ?: "")
+        val rawAlias = modelAliases[model].orEmpty()
+        val displayAlias = replaceCustomProviderIdsForDisplay(rawAlias, customProviders)
+        val aliasState = rememberTextFieldState(displayAlias)
 
         AlertDialog(
             modifier = Modifier.clearFocusOnTap(),
@@ -763,9 +790,9 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             onDismissRequest = { showModelAliasDialog = null },
             title = { Text(stringResource(R.string.models_rename), fontWeight = FontWeight.Bold) },
             text = {
-                val parsed = com.newoether.agora.model.ModelId.parse(model)
+                val displayApiModelName = modelApiDisplayName(model, customProviders)
                 Column(Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.models_rename_current, parsed.apiModelName), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.models_rename_current, displayApiModelName), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
                     Box(modifier = Modifier.noOpBringIntoView()) {
                         OutlinedTextField(
@@ -773,214 +800,22 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             label = { Text(stringResource(R.string.models_alias_hint)) },
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text(parsed.apiModelName) }
+                            placeholder = { Text(displayApiModelName) }
                         )
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.settings.updateModelAlias(model, aliasState.text.toString())
+                    val editedAlias = aliasState.text.toString()
+                    viewModel.settings.updateModelAlias(
+                        model,
+                        if (editedAlias == displayAlias) rawAlias else editedAlias,
+                    )
                     showModelAliasDialog = null
                 }) { Text(stringResource(R.string.provider_save)) }
             },
             dismissButton = { TextButton(onClick = { showModelAliasDialog = null }) { Text(stringResource(R.string.provider_cancel)) } }
         )
-    }
-}
-
-private fun LazyListScope.modelProviderGroups(
-    keyPrefix: String,
-    groups: List<ModelProviderGroup>,
-    firstHeaderStartsSection: Boolean,
-    lastGroupClosesSection: Boolean,
-    allowSpatialTransitions: Boolean,
-    searchActive: Boolean,
-    enabledModels: Set<String>,
-    modelAliases: Map<String, String>,
-    customProviders: List<CustomProviderConfig>,
-    expandedProviders: MutableMap<String, MutableTransitionState<Boolean>>,
-    modelBlockHeights: MutableMap<String, Float>,
-    onAliasClick: ((String) -> Unit)?,
-    onDetailsClick: ((String) -> Unit)?,
-    onEnabledChange: (String, Boolean) -> Unit,
-) {
-    groups.forEachIndexed { providerIndex, group ->
-        val providerName = group.providerName
-        val displayProviderName = providerDisplayName(providerName, customProviders)
-        val models = group.models
-        val providerStateKey = "$keyPrefix:$providerName"
-        val transitionState = expandedProviders.getOrPut(providerStateKey) {
-            MutableTransitionState(false)
-        }
-        val isFirstProvider = providerIndex == 0
-        val isLastProvider = providerIndex == groups.lastIndex
-        val topRadius = if (isFirstProvider && firstHeaderStartsSection) 24f else 5f
-        val collapsedBottomRadius =
-            if (isLastProvider && lastGroupClosesSection) 24f else 5f
-
-        item(key = "${keyPrefix}_header_$providerName") {
-            val isExpanded = transitionState.targetState
-            val currentHeight = modelBlockHeights[providerStateKey] ?: 0f
-            val collapsedRatio =
-                (1f - currentHeight / collapsedBottomRadius).coerceIn(0f, 1f)
-            val bottomRadius = (collapsedBottomRadius * collapsedRatio).dp
-            val headerShape = RoundedCornerShape(
-                topStart = topRadius.dp,
-                topEnd = topRadius.dp,
-                bottomStart = bottomRadius,
-                bottomEnd = bottomRadius,
-            )
-
-            CardSurface(
-                shape = headerShape,
-                addTopGap = !(isFirstProvider && firstHeaderStartsSection),
-            ) {
-                val headerIconRes = providerIcon(displayProviderName)
-                val isLocalHeader =
-                    displayProviderName.equals(Constants.PROVIDER_LOCAL, ignoreCase = true)
-                SettingsItem(
-                    headlineContent = { Text(displayProviderName) },
-                    supportingContent = {
-                        val enabledCount = models.count { it in enabledModels }
-                        Text(
-                            stringResource(
-                                if (searchActive) {
-                                    R.string.models_search_count_status
-                                } else {
-                                    R.string.models_count_status
-                                },
-                                enabledCount,
-                                models.size,
-                            )
-                        )
-                    },
-                    leadingContent = {
-                        when {
-                            isLocalHeader -> Icon(
-                                Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp),
-                            )
-                            headerIconRes != 0 -> Icon(
-                                painterResource(headerIconRes),
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp),
-                            )
-                            else -> Icon(
-                                Icons.Default.Cloud,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                    },
-                    trailingContent = {
-                        Icon(
-                            if (isExpanded) {
-                                Icons.Default.KeyboardArrowUp
-                            } else {
-                                Icons.Default.KeyboardArrowDown
-                            },
-                            contentDescription = null,
-                        )
-                    },
-                    modifier = Modifier.clickable {
-                        transitionState.targetState = !transitionState.targetState
-                    },
-                )
-            }
-        }
-
-        item(key = "${keyPrefix}_models_$providerName") {
-            val density = LocalDensity.current
-            key(transitionState) {
-                AnimatedVisibility(
-                    visibleState = transitionState,
-                    enter = if (allowSpatialTransitions) {
-                        expandVertically()
-                    } else {
-                        fadeIn()
-                    },
-                    exit = if (allowSpatialTransitions) {
-                        shrinkVertically()
-                    } else {
-                        fadeOut()
-                    },
-                    modifier = Modifier.onGloballyPositioned { coordinates ->
-                        modelBlockHeights[providerStateKey] =
-                            coordinates.size.height / density.density
-                    },
-                ) {
-                    Column {
-                        models.forEachIndexed { modelIndex, model ->
-                            val isLastModel = modelIndex == models.lastIndex
-                            val modelShape = when {
-                                isLastModel && isLastProvider && lastGroupClosesSection ->
-                                    FlatToBottom
-                                isLastModel -> FiveBottom
-                                else -> FlatShape
-                            }
-                            CardSurface(shape = modelShape) {
-                                val isEnabled = model in enabledModels
-                                val alias = modelAliases[model]
-                                val parsed = ModelId.parse(model)
-                                val displayName = alias ?: parsed.apiModelName
-                                SettingsItem(
-                                    headlineContent = { Text(displayName) },
-                                    supportingContent = if (alias != null) {
-                                        { Text(parsed.apiModelName) }
-                                    } else {
-                                        null
-                                    },
-                                    trailingContent = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            if (onDetailsClick != null) {
-                                                IconButton(
-                                                    onClick = { onDetailsClick(model) },
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.Edit,
-                                                        contentDescription =
-                                                            stringResource(
-                                                                R.string.models_custom_details
-                                                            ),
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(20.dp),
-                                                    )
-                                                }
-                                            } else if (onAliasClick != null) {
-                                                IconButton(
-                                                    onClick = { onAliasClick(model) },
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.Edit,
-                                                        contentDescription =
-                                                            stringResource(
-                                                                R.string.models_rename
-                                                            ),
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(20.dp),
-                                                    )
-                                                }
-                                            }
-                                            Checkbox(
-                                                checked = isEnabled,
-                                                onCheckedChange = {
-                                                    onEnabledChange(model, it)
-                                                },
-                                            )
-                                        }
-                                    },
-                                    modifier = Modifier.padding(start = 16.dp),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }

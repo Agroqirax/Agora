@@ -4,6 +4,11 @@ This document describes the current repository architecture. It intentionally av
 line counts and exhaustive file inventories because those became stale faster than the
 contracts they were meant to explain.
 
+Normative development behavior is indexed by `.harness/PROJECTS.md`. Before changing Agora, read
+`development/README.md` and every applicable module contract; for message generation, Run
+boundaries, Provider context, Compact, and Regenerate, `development/message-generation.md` is the
+authoritative contract when older descriptive prose conflicts.
+
 ## 1. System shape
 
 Agora is a single-module Android application built with Kotlin, Jetpack Compose,
@@ -146,16 +151,15 @@ bounded retry and its exact Room result returns as `FinalizationCompleted`, whil
 
 The migrated conversation-runtime slice is authoritative for ordinary foreground/headless Send,
 memory-guidance placement, the in-process generation slot, Provider-pass acceptance, normal/Stop
-finalization barriers, tool-round gates, and
-manual/automatic Context Compact admission/result settlement. Pure
-`ConversationCommand`, `RunState`, `RunEffect`, and
-`ConversationRuntimeReducer` types decide
-`Idle`/`Recovering`/`Preparing`/`Active`/`Compacting`/`Finalizing`/`Stopping`, coroutine settlement,
-durable settlement, Compact continuation, and slot release. `ConversationGenerationState` retains the legacy per-
-conversation monitor, tokens, Job, streams, and UI flows as an adapter, but its former
-`SlotPhase` and Stop-barrier Booleans no longer exist. Every Stop-finalization result echoes
-conversation, Run, pass, owner, and effect identity; stale and duplicate results are rejected
-before either slot or overlay mutation.
+finalization barriers, tool-round gates, and slot release. Pure `ConversationCommand`, `RunState`,
+`RunEffect`, and `ConversationRuntimeReducer` types decide
+`Idle`/`Recovering`/`Preparing`/`Active`/`Finalizing`/`Stopping`, coroutine settlement, durable
+settlement, and continuation. Compact does not own a parallel runtime state: it enters the same
+ordinary fresh-Run continuation, Provider, streaming, Stop, settlement, recovery, and queue path.
+`ConversationGenerationState` retains the legacy per-conversation monitor, tokens, Job, streams,
+and UI flows as an adapter, but its former `SlotPhase` and Stop-barrier Booleans no longer exist.
+Every Stop-finalization result echoes conversation, Run, pass, owner, and effect identity; stale
+and duplicate results are rejected before either slot or overlay mutation.
 
 Normal finalization and Job completion are independent barriers, just like Stop finalization. A
 bound durable Run never becomes Idle from `CoroutineSettled` alone. Either barrier may arrive first;
@@ -197,19 +201,19 @@ late exact Run identity is adopted by the existing `Stopping` state. That transi
 identified `FinalizeStop`; the coroutine and persistence barriers still both have to settle. The
 normal commit race therefore cannot bypass the mailbox or attach work to the stopped Run.
 
-Manual Compact claims `Idle` as an identity-bearing `RunState.Compacting`, activates the ordinary
-generating/loading projection, and installs its coroutine as the conversation's generation Job.
-The composer therefore follows the standard contract: empty input exposes Stop, while non-empty
-text or attachments enter the existing `AcceptGuidance` FIFO and drain through a fresh normal Send
-after Compact releases the slot. Automatic pre-send Compact first publishes its durable capsule,
-then returns to the unchanged send path so the accepted user input is queued without duplication.
+Manual, automatic, and Recompact generation are ordinary fresh-Run continuations. Compact freezes
+only its declared model/generation parameters, disables tools and haptics, supplies the Compact
+system prompt and message presentation, and then delegates durable graph admission, context/API
+path construction, Provider execution, streaming/checkpoints, Stop, settlement, recovery, and
+queue release to the ordinary generation owners. Recompact uses the same pipeline from the
+target's existing parent and atomically moves only that Compact row to a fresh Run; suffix message
+rows remain unchanged.
 
-Compact inside an already-active Run temporarily owns that exact Run/pass, and only its exact
-`CompactCompleted` result may emit `ResumeAfterCompact`; Stop can instead move the Run directly to
-`Stopping`, making a late Compact result stale. Foreground and Task executors use the same
-`ContextCompactEffectCoordinator`. The compactor performs a non-destructive selected-graph
-calculation and one Room Compact-boundary transaction using the durable Compact Run id supplied by
-the identified effect. Direct-only automation receives busy and creates no input.
+After a durable tool result, continuation ownership is `Compact -> FIFO queue -> loop`. The queue
+pending/claimed check and no-input loop admission are linearized so guidance cannot be duplicated
+or lost at Compact settlement. Each admitted operation gets a fresh Run ID; Provider passes and
+tool rounds inside that admitted generation retain the same Run. Direct-only automation receives
+busy and creates no input.
 
 Startup recovery now uses the same pure runtime contract: Room reads ordered `ACTIVE`/`STOPPING`
 snapshots, reduces each through `Recover`, executes the exact `RecoverDurableRun` transaction, and
@@ -385,8 +389,8 @@ The local persistence declarations are split by responsibility without creating 
   validation;
 - `ChatDao.kt` is the sole `@Dao`, extends the two stateless declaration surfaces below, and owns
   common graph/Run/embedding/export declarations plus cross-domain transactions;
-- `ChatContextCompactDao.kt` owns the atomic Compact insertion, settlement, recompact, deletion,
-  branch-rewiring, and dedicated-Run declarations;
+- `ChatContextCompactDao.kt` owns only atomic same-row fresh-Run Recompact substitution, target-only
+  Compact deletion, necessary graph rewiring, and their narrow declarations;
 - `ChatAutomationDao.kt` owns the inherited Task and Loop row declarations;
 - `ChatDatabase.kt` is only the v22 Room composition root and migration chain.
 
@@ -412,10 +416,10 @@ same order: `AutomationExecutionGate` first, then the automation-priority
 through a direct-only call and joins its exact Job. Headless Tasks/Loops submit the same
 `SendRequested` -> `PersistAcceptedInput` -> `InputPersisted` contract and share the ordinary
 USER/MODEL/Run graph writer. Busy is a typed no-input/no-Run outcome; no bridge queues or falls back
-to a second writer. Automatic Compact now uses the same mailbox effect/result contract in foreground
-and headless execution. `TaskExecutionEngine` still adapts headless request construction and
-Provider-effect execution; Provider outcome acceptance and normal finalization already use the
-shared mailbox contract.
+to a second writer. Automatic Compact uses the same ordinary fresh-Run continuation and generation
+tail in foreground and headless execution. `TaskExecutionEngine` still adapts headless request
+construction and Provider-effect execution; Provider outcome acceptance and normal finalization use
+the shared mailbox contract.
 
 One-shot schedules preserve explicit past dates so validation can reject them. The
 scheduler must not silently reinterpret an expired date as next year.

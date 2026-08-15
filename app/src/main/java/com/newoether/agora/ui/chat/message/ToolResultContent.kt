@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -489,7 +490,7 @@ private fun WebSearchResult(
         ToolMutedContent(toolSummary(presentation))
         return
     }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column {
         results.forEachIndexed { index, value ->
             val item = value as? JsonObject
             val title = item.string("title") ?: stringResource(R.string.tool_web_result, index + 1)
@@ -501,27 +502,14 @@ private fun WebSearchResult(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(
-                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.45f),
-                        RoundedCornerShape(10.dp),
-                    )
-                    .padding(10.dp),
+                    .padding(vertical = 12.dp),
             ) {
                 Text(
                     text = title,
-                    style = ChatType.meta,
+                    style = ChatType.body,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                if (!url.isNullOrBlank()) {
-                    Text(
-                        text = url,
-                        style = ChatType.metaNormal,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
                 if (!snippet.isNullOrBlank()) {
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -530,6 +518,21 @@ private fun WebSearchResult(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (!url.isNullOrBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = url,
+                        style = ChatType.micro,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (index < results.lastIndex) {
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                )
             }
         }
     }

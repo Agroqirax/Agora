@@ -1,5 +1,11 @@
 package com.newoether.agora.data
 
+import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationAnchor
+import com.newoether.agora.model.CitationPolicy
+import com.newoether.agora.model.Participant
+import com.newoether.agora.model.citationRecords
+import com.newoether.agora.model.toMessageSegment
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -106,11 +112,60 @@ class CustomProviderIdentityPolicyTest {
     }
 
     @Test
+    fun modelAliasDisplayReplacesStableIdsInsideAliasText() {
+        val id = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val model = "$id:gemini-3.1-pro"
+        val aliases = mapOf(model to "Fast via $id")
+        val providers = listOf(CustomProviderConfig(name = "Relay X", id = id))
+
+        assertEquals("Fast via Relay X", modelAliasDisplayName(model, aliases, providers))
+        assertEquals("Fast via Custom", modelAliasDisplayName(model, aliases, emptyList()))
+    }
+
+    @Test
+    fun bareStableModelIdUsesProviderDisplayFallback() {
+        val id = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val providers = listOf(CustomProviderConfig(name = "Relay X", id = id))
+
+        assertEquals("Relay X", modelApiDisplayName(id, providers))
+        assertEquals("Custom", modelApiDisplayName(id, emptyList()))
+    }
+
+    @Test
     fun unresolvedStableIdentityNeverLeaksIntoDisplayText() {
         val id = "custom-provider-00000000-0000-4000-8000-000000000001"
 
         assertEquals("Custom", providerDisplayName(id, emptyList()))
         assertEquals("model (Custom)", modelDisplayName("$id:model", emptyMap(), emptyList()))
+    }
+
+    @Test
+    fun citationSegmentsBypassCustomProviderDisplayReplacement() {
+        val id = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val answer = "Claim"
+        val citation = requireNotNull(
+            CitationPolicy.create(
+                provider = "custom",
+                kind = "file",
+                title = "Source",
+                providerSourceId = id,
+                anchors = listOf(CitationAnchor(0, answer.length, answer)),
+                answerText = answer,
+            ),
+        )
+        val segment = citation.toMessageSegment()
+        val message = ChatMessage(
+            text = answer,
+            participant = Participant.MODEL,
+            segments = listOf(segment),
+        )
+
+        val displayed = message.forDisplay(
+            listOf(CustomProviderConfig(name = "Relay X", id = id)),
+        )
+
+        assertEquals(segment, displayed.segments?.single())
+        assertEquals(id, displayed.citationRecords().single().providerSourceId)
     }
 
     @Test

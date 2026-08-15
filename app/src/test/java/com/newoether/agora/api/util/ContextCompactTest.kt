@@ -3,11 +3,6 @@ package com.newoether.agora.api.util
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
-import com.newoether.agora.api.OpenAiChatRequest
-import com.newoether.agora.api.openai.requireValidWireFormat
-import com.newoether.agora.viewmodel.buildCompactSummaryInput
-import com.newoether.agora.viewmodel.buildRolledCompactInput
-import com.newoether.agora.viewmodel.compactProviderMessageBudget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -265,83 +260,6 @@ class ContextCompactTest {
             linkedSetOf("compact_boundary", "u1", "a1"),
             retained,
         )
-    }
-
-    @Test
-    fun compactSummaryRequestEndsWithEphemeralUserInputForStrictProviders() {
-        val prefixEndingInAssistant = listOf(
-            message("u0", "question", Participant.USER),
-            message("a0", "answer", Participant.MODEL),
-        )
-
-        val compactInput = buildCompactSummaryInput(prefixEndingInAssistant)
-        val prepared = prepareMessages(compactInput, contextTokenBudget = Int.MAX_VALUE)
-        val request = OpenAiChatRequest(
-            model = "deepseek-test",
-            messages = convertToOpenAiMessages(prepared),
-        )
-
-        request.requireValidWireFormat("DeepSeek")
-        assertEquals(Participant.USER, compactInput.last().participant)
-        assertTrue(compactInput.last().id.startsWith("ephemeral_summary_request_"))
-        assertEquals(prefixEndingInAssistant, compactInput.dropLast(1))
-    }
-
-    @Test
-    fun rolledCompactInputIncludesTheCompleteContextRegardlessOfRetention() {
-        val context = listOf(
-            message("compact_boundary", "prior summary", Participant.MODEL),
-            message("u1", "first question", Participant.USER),
-            message("a1", "first answer", Participant.MODEL),
-            message("u2", "recent question", Participant.USER),
-        )
-
-        val input = buildRolledCompactInput(context, "compact prompt", contextWindow = 8_192)
-
-        assertEquals(
-            listOf("prior summary\nfirst question", "first answer", "recent question"),
-            input.dropLast(1).map { it.text },
-        )
-        assertTrue(input.last().id.startsWith("ephemeral_summary_request_"))
-    }
-
-    @Test
-    fun rolledCompactInputUsesTheStandardUserLedSuffixWindow() {
-        val context = listOf(
-            message("u0", "old question ".repeat(80), Participant.USER),
-            message("a0", "old answer ".repeat(80), Participant.MODEL),
-            message("u1", "new question", Participant.USER),
-            message("a1", "new answer", Participant.MODEL),
-        )
-
-        val input = buildRolledCompactInput(context, "compact prompt", contextWindow = 64)
-
-        assertEquals(Participant.USER, input.first().participant)
-        assertTrue(input.none { it.id == "u0" || it.id == "a0" })
-        assertEquals(listOf("u1", "a1"), input.dropLast(1).map { it.id })
-        assertTrue(input.last().id.startsWith("ephemeral_summary_request_"))
-    }
-
-    @Test
-    fun providerCanonicalizationCannotDropAnOversizedRolledSourceForTheInstruction() {
-        val oversized = "latest source ".repeat(200)
-        val input = buildRolledCompactInput(
-            context = listOf(message("u0", oversized, Participant.USER)),
-            systemPrompt = "compact prompt",
-            contextWindow = 32,
-        )
-        val providerPrepared = prepareMessages(
-            messages = input,
-            contextTokenBudget = compactProviderMessageBudget(
-                input = input,
-                systemPrompt = "compact prompt",
-                contextWindow = 32,
-            ),
-        )
-
-        assertEquals("u0", providerPrepared.first().id)
-        assertTrue(providerPrepared.first().text.startsWith("latest source"))
-        assertTrue(providerPrepared.last().text.contains("Return only the summary"))
     }
 
     @Test

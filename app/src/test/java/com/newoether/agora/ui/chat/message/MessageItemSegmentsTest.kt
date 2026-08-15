@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
@@ -11,6 +12,65 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageItemSegmentsTest {
+
+    @Test
+    fun toolOnlySegmentsDoNotUseMessageThoughtDuration() {
+        val segments = listOf(
+            MessageSegment(type = "tool", toolName = "web_search", toolResult = "{}"),
+        )
+
+        assertEquals(null, thoughtDurationMs(segments, fallbackMs = 4_000L))
+    }
+
+    @Test
+    fun uiSegmentPreparationHidesOnlyExactGeminiGoogleSearchTool() {
+        val merged = mergeAdjacentSegments(
+            listOf(
+                MessageSegment(type = "answer", content = "Answer"),
+                MessageSegment(type = "tool", toolName = "google_search", toolResult = "{}"),
+                MessageSegment(type = "tool", toolName = "web_search", toolResult = "{}"),
+                MessageSegment(type = "tool", toolName = "openai_search", toolResult = "{}"),
+                MessageSegment(type = "tool", toolName = "code_execution", toolResult = "{}"),
+                MessageSegment(type = "tool", toolName = "Google_Search", toolResult = "{}"),
+            ),
+        )
+
+        assertEquals(
+            listOf("web_search", "openai_search", "code_execution", "Google_Search"),
+            merged.filter { it.type == "tool" }.map { it.toolName },
+        )
+        assertEquals("Answer", merged.first().content)
+    }
+
+    @Test
+    fun realThoughtSegmentMayUseMessageThoughtDuration() {
+        val segments = listOf(
+            MessageSegment(type = "thought", content = "Reasoning"),
+            MessageSegment(type = "tool", toolName = "web_search", toolResult = "{}"),
+        )
+
+        assertEquals(4_000L, thoughtDurationMs(segments, fallbackMs = 4_000L))
+    }
+
+    @Test
+    fun persistedThoughtSegmentDurationWinsOverMessageFallback() {
+        val segments = listOf(
+            MessageSegment(type = "thought", content = "Reasoning", durationMs = 1_500L),
+            MessageSegment(type = "thought", content = "More", durationMs = 500L),
+        )
+
+        assertEquals(2_000L, thoughtDurationMs(segments, fallbackMs = 4_000L))
+    }
+
+    @Test
+    fun timelineInfoBlockUsesCompactTopSpacingWithoutVisibleMessageAbove() {
+        assertEquals(0.dp, timelineInfoTopPaddingExtra(false))
+    }
+
+    @Test
+    fun timelineInfoBlockUsesNormalSeparationAfterVisibleMessage() {
+        assertEquals(8.dp, timelineInfoTopPaddingExtra(true))
+    }
 
     @Test
     fun reducedMotionRetainsExpandedLayoutUntilCollapseFadeSettles() {

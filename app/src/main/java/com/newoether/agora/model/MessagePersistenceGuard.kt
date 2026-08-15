@@ -66,11 +66,18 @@ object MessagePersistenceGuard {
             if (utf8Size(json) <= maxBytes) return json
             val pick = current.withIndex().maxByOrNull { (_, s) -> trimmableSize(s) } ?: return json
             val seg = pick.value
-            // A large number of individually-small segments, huge arguments, signatures, or image
             // metadata can exceed the budget even when no result/content field is trimmable.
-            // Persisting the oversized JSON would recreate #51, so fail closed to SQL NULL; the
-            // message's separately-persisted text remains readable and the database stays usable.
-            if (!canTrim(seg)) return null
+            // Persisting ordinary oversized metadata would recreate #51, so it still degrades to
+            // SQL NULL. Provider continuation state is protected protocol data, however: losing it
+            // while retaining tool outputs would create an invalid next request, so fail explicitly.
+            if (!canTrim(seg)) {
+                if (current.any { it.responseOutputItems.isNotEmpty() }) {
+                    error(
+                        "Responses continuation state exceeds the $maxBytes-byte persistence budget",
+                    )
+                }
+                return null
+            }
             current = current.toMutableList().also { it[pick.index] = trimLargest(seg) }
         }
     }

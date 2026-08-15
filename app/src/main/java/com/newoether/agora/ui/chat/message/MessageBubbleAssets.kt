@@ -33,9 +33,12 @@ import androidx.compose.ui.semantics.collectionItemInfo
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.ui.components.LatexImageTransformer
@@ -77,6 +80,7 @@ import com.mikepenz.markdown.compose.elements.LocalTableRowIndex
 import com.mikepenz.markdown.compose.elements.material.MarkdownBasicText
 import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import com.mikepenz.markdown.annotator.AnnotatorSettings
 import com.mikepenz.markdown.annotator.annotatorSettings
 import com.mikepenz.markdown.annotator.buildMarkdownAnnotatedString
 import org.intellij.markdown.MarkdownElementTypes
@@ -105,6 +109,44 @@ internal class ChatMarkdownAssets(
     val flavour: MarkdownFlavourDescriptor,
 )
 
+internal fun chatLinkTextStyles(color: Color): TextLinkStyles {
+    val style = SpanStyle(
+        color = color,
+        textDecoration = TextDecoration.None,
+    )
+    return TextLinkStyles(
+        style = style,
+        focusedStyle = style,
+        hoveredStyle = style,
+        pressedStyle = style,
+    )
+}
+
+internal fun buildCitationAwareMarkdownAnnotatedString(
+    content: String,
+    textNode: ASTNode,
+    style: TextStyle,
+    annotatorSettings: AnnotatorSettings,
+    citationTokens: Map<Char, CitationInlineToken>,
+    literalText: String? = null,
+): AnnotatedString {
+    val annotated = if (literalText != null) {
+        AnnotatedString(literalText)
+    } else {
+        content.buildMarkdownAnnotatedString(
+            textNode = textNode,
+            style = style,
+            annotatorSettings = annotatorSettings,
+        )
+    }
+    return annotated.replaceCitationInlineTokens(citationTokens)
+}
+
+private const val MARKDOWN_LINE_HEIGHT_MULTIPLIER = 1.1f
+
+internal fun scaledMarkdownTextStyle(style: TextStyle): TextStyle = style.copy(
+    lineHeight = style.lineHeight * MARKDOWN_LINE_HEIGHT_MULTIPLIER,
+)
 @Composable
 internal fun rememberChatMarkdownAssets(
     textColor: Color,
@@ -113,46 +155,50 @@ internal fun rememberChatMarkdownAssets(
     chatWidgetSettings: ChatWidgetSettings = ChatWidgetSettings(),
     onChatWidgetClick: (ExpandedChatWidget) -> Unit = {},
 ): ChatMarkdownAssets {
+    val linkColor = MaterialTheme.colorScheme.primary
+    val linkTextStyles = remember(linkColor) { chatLinkTextStyles(linkColor) }
     // Chat-specific markdown scale — optimized for immersive reading.
     // Outfit's large x-height means 15sp reads like ~16sp Roboto.
     // Heading steps of 3sp (h1→h2→h3) and 2sp (h3→h4) create
     // a visible but not jarring hierarchy during long-form reading.
+    val markdownBodyStyle = scaledMarkdownTextStyle(ChatType.body)
+    val thoughtMarkdownBodyStyle = scaledMarkdownTextStyle(ChatType.thoughtBody)
     val customTypography = markdownTypography(
-        text = ChatType.body,
-        paragraph = ChatType.body,
-        ordered = ChatType.body,
-        bullet = ChatType.body,
-        list = ChatType.body,
-        h1 = ChatType.mdH1,
-        h2 = ChatType.mdH2,
-        h3 = ChatType.mdH3,
-        h4 = ChatType.mdH4,
-        h5 = ChatType.mdH5,
-        h6 = ChatType.mdH6,
-        code = ChatType.code,
-        inlineCode = ChatType.code,
-        table = ChatType.body,
+        text = markdownBodyStyle,
+        paragraph = markdownBodyStyle,
+        ordered = markdownBodyStyle,
+        bullet = markdownBodyStyle,
+        list = markdownBodyStyle,
+        h1 = scaledMarkdownTextStyle(ChatType.mdH1),
+        h2 = scaledMarkdownTextStyle(ChatType.mdH2),
+        h3 = scaledMarkdownTextStyle(ChatType.mdH3),
+        h4 = scaledMarkdownTextStyle(ChatType.mdH4),
+        h5 = scaledMarkdownTextStyle(ChatType.mdH5),
+        h6 = scaledMarkdownTextStyle(ChatType.mdH6),
+        code = scaledMarkdownTextStyle(ChatType.code),
+        inlineCode = scaledMarkdownTextStyle(ChatType.code),
+        textLink = linkTextStyles,
+        table = markdownBodyStyle,
     )
 
-    // Compact typography for thought blocks — subordinate to main chat body.
-    // One tier below main markdown: body at 13sp (vs 15sp), headings similarly
-    // stepped down. Readable for paragraph-level content but clearly secondary.
+    // Thought markdown keeps its subordinate font sizes while sharing the 1.1x rhythm.
     val thoughtTypography = markdownTypography(
-        text = ChatType.thoughtBody,
-        paragraph = ChatType.thoughtBody,
-        ordered = ChatType.thoughtBody,
-        bullet = ChatType.thoughtBody,
-        list = ChatType.thoughtBody,
-        h1 = ChatType.thH1,
-        h2 = ChatType.thH2,
-        h3 = ChatType.thH3,
-        h4 = ChatType.thH4,
-        h5 = ChatType.thH5,
-        h6 = ChatType.thH6,
-        code = ChatType.thoughtCode,
-        inlineCode = ChatType.thoughtCode,
+        text = thoughtMarkdownBodyStyle,
+        paragraph = thoughtMarkdownBodyStyle,
+        ordered = thoughtMarkdownBodyStyle,
+        bullet = thoughtMarkdownBodyStyle,
+        list = thoughtMarkdownBodyStyle,
+        h1 = scaledMarkdownTextStyle(ChatType.thH1),
+        h2 = scaledMarkdownTextStyle(ChatType.thH2),
+        h3 = scaledMarkdownTextStyle(ChatType.thH3),
+        h4 = scaledMarkdownTextStyle(ChatType.thH4),
+        h5 = scaledMarkdownTextStyle(ChatType.thH5),
+        h6 = scaledMarkdownTextStyle(ChatType.thH6),
+        code = scaledMarkdownTextStyle(ChatType.thoughtCode),
+        inlineCode = scaledMarkdownTextStyle(ChatType.thoughtCode),
+        textLink = linkTextStyles,
+        table = thoughtMarkdownBodyStyle,
     )
-
     val fg = MaterialTheme.colorScheme.onBackground
     val bg = MaterialTheme.colorScheme.surface
     // Composite fg at 0.1 alpha over bg to produce the exact opaque equivalent
@@ -441,7 +487,7 @@ internal fun rememberChatMarkdownAssets(
             annotator = literalHtmlMarkdownAnnotator,
             imageTransformer = latexImageTransformer,
             flavour = markdownFlavour,
-            plainTextStyle = ChatType.body,
+            plainTextStyle = markdownBodyStyle,
             parseInlineDollarMath = parseInlineDollarMath,
         )
     }
@@ -462,7 +508,7 @@ internal fun rememberChatMarkdownAssets(
             annotator = literalHtmlMarkdownAnnotator,
             imageTransformer = latexImageTransformer,
             flavour = markdownFlavour,
-            plainTextStyle = ChatType.thoughtBody,
+            plainTextStyle = thoughtMarkdownBodyStyle,
             parseInlineDollarMath = parseInlineDollarMath,
         )
     }
@@ -657,16 +703,16 @@ private fun SearchHighlightedMarkdownText(
     activeHighlightColor: Color,
 ) {
     val settings = annotatorSettings()
-    val base = remember(model.content, textNode, style, literalText, settings) {
-        if (literalText != null) {
-            AnnotatedString(literalText)
-        } else {
-            model.content.buildMarkdownAnnotatedString(
-                textNode = textNode,
-                style = style,
-                annotatorSettings = settings,
-            )
-        }
+    val citationTokens = LocalCitationInlineTokens.current
+    val base = remember(model.content, textNode, style, literalText, settings, citationTokens) {
+        buildCitationAwareMarkdownAnnotatedString(
+            content = model.content,
+            textNode = textNode,
+            style = style,
+            annotatorSettings = settings,
+            citationTokens = citationTokens,
+            literalText = literalText,
+        )
     }
     val streamingFadeSpec = LocalStreamingGlyphFadeSpec.current
     val fadeTargetOffset = streamingFadeSpec?.lastVisibleSourceOffset

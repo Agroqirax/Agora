@@ -5,7 +5,7 @@ class CustomOpenAiProvider(
     override val defaultBaseUrl: String
 ) : BaseOpenAiProvider() {
 
-    override val retryableStatusCodes: Set<Int> = setOf(401, 429, 502, 503, 504)
+    override val retryableStatusCodes: Set<Int> = setOf(429, 502, 503, 504)
 
     override val retryMissingV1BaseUrl: Boolean = true
 

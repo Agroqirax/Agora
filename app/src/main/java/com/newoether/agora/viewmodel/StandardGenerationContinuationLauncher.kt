@@ -9,8 +9,11 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunStatus
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
 /** One ordinary Assistant generation that continues from an already-durable graph boundary. */
@@ -19,18 +22,32 @@ internal data class StandardGenerationContinuationRequest(
     val parentMessageId: String,
     val snapshot: GenerationAdmissionSnapshot,
     val alreadyHoldsConversationLock: Boolean = false,
+    val modelMessageId: String? = null,
+    val replacementMessageId: String? = null,
+    val callerTag: String = "standardContinuation",
+    val queueDrainRequiresSuccess: Boolean = false,
+    val transformFinalText: (String, MessageStatus) -> String = { text, _ -> text },
 )
+
+internal suspend fun launchStandardContinuationAfterGuidance(
+    state: ConversationGenerationState,
+    guidanceClaimRevision: Long,
+    launch: () -> StandardGenerationContinuationLaunch?,
+): StandardGenerationContinuationLaunch? = state.queueMutationMutex.withLock {
+    if (state.hasPendingOrClaimedGuidanceSince(guidanceClaimRevision)) null else launch()
+}
 
 internal data class StandardGenerationContinuationLaunch(
     val job: Job,
     val modelMessageId: String,
+    val started: Deferred<Boolean>,
 )
 
 /**
- * Starts a fresh Run and ordinary Assistant placeholder without synthesizing a USER message.
+ * Starts an ordinary Assistant continuation without persisting a synthetic USER message.
  *
- * This is the standard continuation primitive for any durable protocol boundary. Compact merely
- * chooses the parent boundary; it does not resume an old Run or reuse an old streaming message.
+ * Every caller creates a fresh Run. Append callers also create a row; same-position replacement
+ * callers atomically move only the target row to the fresh Run and preserve every descendant.
  */
 internal class StandardGenerationContinuationLauncher(
     private val conversations: ConversationRepository,
@@ -54,51 +71,89 @@ internal class StandardGenerationContinuationLauncher(
     ): StandardGenerationContinuationLaunch? {
         val uiToken = state.tryAcquireForReplacement() ?: return null
         val runId = idFactory()
-        val modelMessageId = idFactory()
-        val generationJob = state.launchGenerationJob(uiToken) generation@{
+        val modelMessageId = request.replacementMessageId ?: request.modelMessageId ?: idFactory()
+        val started = CompletableDeferred<Boolean>()
+        val generationJob = state.launchGenerationJob(
+            uiToken = uiToken,
+            suppressAutomaticQueueDrain = request.queueDrainRequiresSuccess,
+        ) generation@{
             var runCreated = false
             var runBound = false
             var stopFinalizationClaimed = false
+
+            suspend fun reconcileCommittedRun(): Boolean =
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    if (!runCreated) runCreated = conversations.getRun(runId) != null
+                    runCreated
+                }
+
             try {
                 val persistId = state.nextPersistId()
                 val launchAtBoundary: suspend () -> Unit = boundary@{
                     if (!state.isCurrentToken(uiToken)) return@boundary
-                    val parent = conversations
+                    val loadedMessages = conversations
                         .getMessagesForConversationSnapshot(request.conversationId)
-                        .find { it.id == request.parentMessageId }
+                    val parent = loadedMessages.find { it.id == request.parentMessageId }
                         ?: return@boundary
                     val selectedChildren =
                         conversations.restoreBranchSelections(request.conversationId)
-                    if (selectedChildren[parent.id] != null) return@boundary
+                    if (
+                        request.replacementMessageId == null &&
+                        selectedChildren[parent.id] != null
+                    ) return@boundary
                     val generationSnapshot = request.snapshot.copy(runId = runId)
                     val messageId = modelMessageId
                     val startTime = maxOf(clock(), parent.timestamp + 1)
-                    val modelEntity = MessageEntity(
-                        id = messageId,
-                        conversationId = request.conversationId,
-                        parentId = parent.id,
-                        text = "",
-                        status = MessageStatus.SENDING,
-                        participant = Participant.MODEL,
-                        timestamp = startTime,
-                        modelName = generationSnapshot.selectedModelId,
-                        runId = runId,
-                        runSequence = 0,
-                    )
-                    val graphCommit = conversations.createRunWithMessages(
-                        run = RunEntity(
-                            id = runId,
+                    val modelEntity: MessageEntity
+                    val messageSelections: Map<String?, String>
+                    if (request.replacementMessageId != null) {
+                        val target = loadedMessages.find { it.id == request.replacementMessageId }
+                            ?: return@boundary
+                        if (target.parentId != parent.id) return@boundary
+                        modelEntity = conversations.beginRecompactContextCompact(
+                            replacementRun = RunEntity(
+                                id = runId,
+                                conversationId = request.conversationId,
+                                parentRunId = parent.runId,
+                                status = RunStatus.ACTIVE,
+                                activeSlot = 1,
+                                startedAt = startTime,
+                                lastCheckpointAt = startTime,
+                            ),
+                            messageId = target.id,
+                            modelName = generationSnapshot.selectedModelId,
+                            expectedSelections = selectedChildren,
+                        )
+                        messageSelections = selectedChildren
+                    } else {
+                        modelEntity = MessageEntity(
+                            id = messageId,
                             conversationId = request.conversationId,
-                            parentRunId = parent.runId,
-                            status = RunStatus.ACTIVE,
-                            activeSlot = 1,
-                            startedAt = startTime,
-                            lastCheckpointAt = startTime,
-                        ),
-                        messages = listOf(modelEntity),
-                        messageSelectionUpdates = mapOf(parent.id to messageId),
-                        conversationModelId = generationSnapshot.selectedModelId,
-                    )
+                            parentId = parent.id,
+                            text = "",
+                            status = MessageStatus.SENDING,
+                            participant = Participant.MODEL,
+                            timestamp = startTime,
+                            modelName = generationSnapshot.selectedModelId,
+                            runId = runId,
+                            runSequence = 0,
+                        )
+                        val graphCommit = conversations.createRunWithMessages(
+                            run = RunEntity(
+                                id = runId,
+                                conversationId = request.conversationId,
+                                parentRunId = parent.runId,
+                                status = RunStatus.ACTIVE,
+                                activeSlot = 1,
+                                startedAt = startTime,
+                                lastCheckpointAt = startTime,
+                            ),
+                            messages = listOf(modelEntity),
+                            messageSelectionUpdates = mapOf(parent.id to messageId),
+                            conversationModelId = generationSnapshot.selectedModelId,
+                        )
+                        messageSelections = graphCommit.messageSelections
+                    }
                     runCreated = true
                     val binding = state.bindPersistedRun(uiToken, runId)
                     runBound = binding is ConversationGenerationState.RunBindingOutcome.Active
@@ -120,24 +175,35 @@ internal class StandardGenerationContinuationLauncher(
                         projectGraph(
                             request.conversationId,
                             listOf(placeholder),
-                            graphCommit.messageSelections,
+                            messageSelections,
                             placeholder,
                         )
                     }
+                    started.complete(true)
                     boundRunGenerationLauncher().launch(
                         BoundRunGenerationRequest(
                             conversationId = request.conversationId,
                             modelMessageId = messageId,
-                            startTime = startTime,
+                            startTime = modelEntity.timestamp,
                             snapshot = generationSnapshot,
                             uiToken = uiToken,
                             persistId = persistId,
                             runId = runId,
                             pass = 0,
-                            callerTag = "standardContinuation",
+                            callerTag = request.callerTag,
+                            transformFinalText = request.transformFinalText,
                         ),
                         state,
                     )
+                    if (request.queueDrainRequiresSuccess) {
+                        val terminalStatus = conversations
+                            .getMessagesForConversationSnapshot(request.conversationId)
+                            .find { it.id == messageId }
+                            ?.status
+                        if (terminalStatus == MessageStatus.SUCCESS) {
+                            state.cancelDeferredQueueDrain()
+                        }
+                    }
                 }
                 if (request.alreadyHoldsConversationLock) {
                     launchAtBoundary()
@@ -147,7 +213,7 @@ internal class StandardGenerationContinuationLauncher(
                     }
                 }
             } catch (error: CancellationException) {
-                if (runCreated && !runBound && !stopFinalizationClaimed) {
+                if (reconcileCommittedRun() && !runBound && !stopFinalizationClaimed) {
                     withContext(kotlinx.coroutines.NonCancellable) {
                         val binding = state.bindPersistedRun(uiToken, runId)
                         stopFinalizationClaimed =
@@ -159,7 +225,7 @@ internal class StandardGenerationContinuationLauncher(
                 }
                 throw error
             } catch (error: Exception) {
-                if (runCreated && !runBound && !stopFinalizationClaimed) {
+                if (reconcileCommittedRun() && !runBound && !stopFinalizationClaimed) {
                     withContext(kotlinx.coroutines.NonCancellable) {
                         val binding = state.bindPersistedRun(uiToken, runId)
                         runBound = binding is ConversationGenerationState.RunBindingOutcome.Active
@@ -179,9 +245,11 @@ internal class StandardGenerationContinuationLauncher(
                 )
             }
         } ?: return null
+        generationJob.invokeOnCompletion { started.complete(false) }
         return StandardGenerationContinuationLaunch(
             job = generationJob,
             modelMessageId = modelMessageId,
+            started = started,
         )
     }
 }

@@ -11,6 +11,46 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ToolPresentationResolverTest {
+
+    @Test
+    fun providerHostedSearchNamesUseWebSearchPresentation() {
+        assertEquals(ToolKind.WEB_SEARCH, ToolPresentationResolver.kindForToolName("openai_search"))
+        assertEquals(ToolKind.WEB_SEARCH, ToolPresentationResolver.kindForToolName("google_search"))
+    }
+
+    @Test
+    fun googleSearchGroundingUsesNormalizedResults() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "google_search",
+                toolArgs = """{"query":"Agora"}""",
+                toolResult = """{"type":"web_search","provider":"Google","query":"Agora","results":[{"title":"Agora","url":"https://example.com"}]}""",
+                toolState = ToolExecutionStates.SUCCEEDED,
+            ),
+        )
+
+        assertEquals(ToolKind.WEB_SEARCH, presentation.kind)
+        assertEquals("Agora", presentation.subject)
+        assertEquals(1, presentation.count)
+        assertEquals(ToolPresentationState.COMPLETED, presentation.state)
+    }
+
+    @Test
+    fun runningCodeExecutionRemainsAnActiveHostedTool() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "code_execution",
+                toolArgs = """{"language":"PYTHON","code":"print(1)"}""",
+                toolState = ToolExecutionStates.RUNNING,
+            ),
+        )
+
+        assertEquals(ToolPresentationState.RUNNING, presentation.state)
+        assertTrue(presentation.isActive)
+    }
+
     @Test
     fun shellCommandSummary_isAlwaysSingleLineAndBounded() {
         val command = "  echo first\r\n   &&   echo second  "
@@ -419,5 +459,36 @@ class ToolPresentationResolverTest {
         assertEquals("""{"value":7}""", presentation.rawStructuredResult)
         assertEquals("Filesystem", presentation.device)
         assertEquals(ToolPresentationState.COMPLETED, presentation.state)
+    }
+
+    @Test
+    fun waitForJobResolvesAsShellJobAndKeepsFullOutput() {
+        val running = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "wait_for_job",
+                toolState = ToolExecutionStates.RUNNING,
+                toolProgress = "streaming output",
+                toolTarget = "tinybox",
+            ),
+        )
+
+        assertEquals(ToolKind.SHELL_JOB_GET, running.kind)
+        assertEquals(ToolPresentationState.RUNNING, running.state)
+        assertEquals("streaming output", shellOutputText(running))
+
+        val terminal = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "wait_for_job",
+                toolArgs = """{"job_id":"job-9"}""",
+                toolResult = """{"type":"wait_for_job","job_id":"job-9","result":{"state":"succeeded","exit_code":0,"output":"done"}}""",
+            ),
+        )
+
+        assertEquals(ToolKind.SHELL_JOB_GET, terminal.kind)
+        assertEquals(ToolPresentationState.COMPLETED, terminal.state)
+        assertEquals("done", shellOutputText(terminal))
+        assertEquals("job-9", terminal.jobId)
     }
 }

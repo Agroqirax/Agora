@@ -51,6 +51,7 @@ import com.newoether.agora.diagnostics.DiagnosticCaptureMode
 import com.newoether.agora.diagnostics.DiagnosticEvent
 import com.newoether.agora.diagnostics.DiagnosticEventPayload
 import com.newoether.agora.diagnostics.DiagnosticSnapshot
+import com.newoether.agora.diagnostics.forDisplay
 import com.newoether.agora.viewmodel.ChatViewModel
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +69,10 @@ fun SettingsDeveloperPage(
     val coroutineScope = rememberCoroutineScope()
     val enabled by viewModel.settings.developerOptionsEnabled.collectAsState()
     val diagnostics by DeveloperDiagnostics.snapshots.collectAsState()
+    val customProviders by viewModel.settings.customProviders.collectAsState()
+    val displayDiagnostics = remember(diagnostics, customProviders) {
+        diagnostics.forDisplay(customProviders)
+    }
     val currentConversation by viewModel.currentConversation.collectAsState()
     val messages by viewModel.messages.collectAsState()
     val totalTokens by viewModel.totalTokens.collectAsState()
@@ -86,6 +91,7 @@ fun SettingsDeveloperPage(
         totalTokens,
         isLoading,
         runtimeTransitions,
+        customProviders,
     ) {
         DeveloperConversationInspector.inspect(
             conversation = currentConversation,
@@ -93,7 +99,7 @@ fun SettingsDeveloperPage(
             totalTokens = totalTokens,
             isLoading = isLoading,
             runtimeTransitions = runtimeTransitions,
-        )
+        )?.forDisplay(customProviders)
     }
     val captureDescription = diagnostics.captureDescription()
     val inspectorTitle = stringResource(R.string.developer_options_inspector)
@@ -102,7 +108,7 @@ fun SettingsDeveloperPage(
     val exportFailedMessage = stringResource(R.string.developer_options_export_failed)
     val hasDiagnostics = diagnostics.session != null || diagnostics.events.isNotEmpty()
     val activeMode = diagnostics.session?.mode?.takeIf { diagnostics.isCaptureActive }
-    val visibleEvents = diagnostics.events.takeLast(MAX_VISIBLE_EVENTS)
+    val visibleEvents = displayDiagnostics.events.takeLast(MAX_VISIBLE_EVENTS)
     val timelineItems: List<@Composable () -> Unit> = if (visibleEvents.isEmpty()) {
         listOf({
             SettingsItem(
@@ -435,7 +441,7 @@ fun SettingsDeveloperPage(
                         modifier = Modifier.clickable(
                             enabled = hasDiagnostics || conversationInspection != null,
                         ) {
-                            val snapshotForExport = diagnostics
+                            val snapshotForExport = displayDiagnostics
                             val conversationForExport = conversationInspection
                             coroutineScope.launch {
                                 runCatching {

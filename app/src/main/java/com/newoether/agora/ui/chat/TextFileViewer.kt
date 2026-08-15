@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.newoether.agora.R
 import com.newoether.agora.ui.chat.message.LiteralHtmlMarkdownBlock
+import com.newoether.agora.ui.chat.message.chatLinkTextStyles
 import com.newoether.agora.ui.chat.message.literalHtmlMarkdownAnnotator
 import com.newoether.agora.ui.theme.MonoFamily
 import com.newoether.agora.util.NoAutoScrollSelectionContainer
@@ -63,6 +64,8 @@ fun TextFileViewer(
             .navigationBarsPadding()
     ) {
         val t = MaterialTheme.typography
+        val linkColor = MaterialTheme.colorScheme.primary
+        val linkTextStyles = remember(linkColor) { chatLinkTextStyles(linkColor) }
         val viewerTypography = markdownTypography(
             text = t.bodyLarge,
             h1 = t.headlineMedium,
@@ -73,6 +76,7 @@ fun TextFileViewer(
             h6 = t.titleSmall,
             code = t.bodyMedium.copy(fontFamily = MonoFamily, fontSize = 13.sp),
             inlineCode = t.bodyMedium.copy(fontFamily = MonoFamily, fontSize = 13.sp),
+            textLink = linkTextStyles,
         )
         val viewerPadding = markdownPadding(block = 7.dp)
         val literalHtmlComponents = remember {

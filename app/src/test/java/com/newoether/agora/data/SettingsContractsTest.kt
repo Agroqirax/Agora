@@ -17,6 +17,12 @@ class SettingsContractsTest {
     }
 
     @Test
+    fun contextCompactThresholdDefaultsToNinetyPercent() {
+        assertEquals(90, DEFAULT_CONTEXT_COMPACT_THRESHOLD_PERCENT)
+        assertEquals(50..100, CONTEXT_COMPACT_THRESHOLD_PERCENT_RANGE)
+    }
+
+    @Test
     fun defaultContextCompactPromptPreservesConversationLanguages() {
         val prompt = BuiltInPrompts.CONTEXT_COMPACT_SYSTEM.lowercase()
         assertTrue(prompt.contains("same language"))
@@ -54,6 +60,13 @@ class SettingsContractsTest {
     @Test
     fun conversationSettingsReportsWhetherAnyOverrideExists() {
         assertTrue(ConversationSettings().isAllNull())
+        assertFalse(ConversationSettings(openAiWebSearchEnabled = false).isAllNull())
         assertFalse(ConversationSettings(shellEnabled = false).isAllNull())
+    }
+    @Test
+    fun removedOpenAiGenericSearchProviderFallsBackToDuckDuckGo() {
+        assertEquals("duckduckgo", normalizeWebSearchProvider(" OpenAI "))
+        assertEquals("duckduckgo", normalizeWebSearchProvider(" unknown "))
+        assertEquals("kagi", normalizeWebSearchProvider(" KAGI "))
     }
 }

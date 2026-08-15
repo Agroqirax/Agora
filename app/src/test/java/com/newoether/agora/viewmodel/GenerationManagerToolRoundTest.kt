@@ -55,6 +55,15 @@ class GenerationManagerToolRoundTest {
     }
 
     @Test
+    fun automaticCompactStartsANoInputLoopOnlyAfterSuccess() {
+        assertTrue(automaticCompactAllowsHandoff(MessageStatus.SUCCESS))
+        assertFalse(automaticCompactAllowsHandoff(MessageStatus.ERROR))
+        assertFalse(automaticCompactAllowsHandoff(MessageStatus.STOPPED))
+        assertFalse(automaticCompactAllowsHandoff(MessageStatus.SENDING))
+        assertFalse(automaticCompactAllowsHandoff(null))
+    }
+
+    @Test
     fun toolRoundThoughtSegments_neverRepeatsEarlierReasoningOrSignatures() {
         val firstThought = MessageSegment(
             type = "thought",

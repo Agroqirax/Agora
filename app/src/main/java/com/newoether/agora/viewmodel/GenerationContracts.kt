@@ -14,6 +14,8 @@ data class GenerationConfig(
     val modelId: String,
     val apiKey: String,
     val effectiveSystemPrompt: String?,
+    /** Optional API-only USER invocation appended to the initial Provider request. */
+    val initialUserPrompt: String? = null,
     val maxContextWindow: Int = ContextBudget.DEFAULT_TOKENS,
     val codeExecutionEnabled: Boolean,
     val googleSearchEnabled: Boolean,
@@ -22,6 +24,8 @@ data class GenerationConfig(
     val thinkingBudgetEnabled: Boolean = false,
     val thinkingBudgetTokens: Int = 4096,
     val openAiServiceTier: String? = null,
+    val responsesApiEnabled: Boolean = false,
+    val openAiWebSearchEnabled: Boolean = false,
     val baseUrl: String?,
     val userPrepend: String? = null,
     val userPostpend: String? = null,
@@ -82,12 +86,18 @@ data class GenerationContext(
 /** Frozen automatic-Compact policy and provider access captured with one generation. */
 internal data class AutomaticCompactConfig(
     val enabled: Boolean,
+    val thresholdPercent: Int,
     val request: CompactRequest,
     val providerName: String,
     val apiKey: String,
     val baseUrl: String?,
+    val responsesApiEnabled: Boolean = false,
     val provider: LlmProvider?,
     val configured: Boolean,
+    /** Frozen ordinary generation parameters resolved for the selected Compact model. */
+    val generationConfig: GenerationConfig,
+    /** Frozen provider registry snapshot used by the shared generation tail. */
+    val providerInstances: Map<String, LlmProvider>,
     /** Frozen attachment/transcription policy used to project Compact input exactly once. */
     val generationContext: GenerationContext,
     /** Frozen API-only USER templates included in the exact Auto Compact threshold projection. */
@@ -176,6 +186,9 @@ internal data class GenerationCallbacks(
     val onToolBatchCompleted: suspend (RunEffectIdentity) -> RunEffect.CommitToolRound? = {
         RunEffect.CommitToolRound(it.copy(effectId = "tool-round-${it.effectId}"))
     },
+    /** Generic final text projection applied before the shared terminal writer persists output. */
+    val transformFinalText: (String, com.newoether.agora.model.MessageStatus) -> String =
+        { text, _ -> text },
     /** Only an accepted durable success result authorizes the next Provider pass. */
     val onToolRoundCommitted: suspend (RunEffectIdentity, Boolean) -> RunEffect? =
         { identity, success ->

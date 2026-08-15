@@ -67,7 +67,11 @@ private fun toolBaseDisplayName(
     ToolKind.MEMORY_EDIT -> stringResource(R.string.tool_edit_memory)
     ToolKind.MEMORY_DELETE -> stringResource(R.string.tool_delete_memory)
     ToolKind.MEMORY_UPDATE_ACTIVE -> stringResource(R.string.tool_update_active_memory)
-    ToolKind.WEB_SEARCH -> stringResource(R.string.tool_web_search)
+    ToolKind.WEB_SEARCH -> when (toolName) {
+        "openai_search" -> stringResource(R.string.openai_search)
+        "google_search" -> stringResource(R.string.google_search)
+        else -> stringResource(R.string.tool_web_search)
+    }
     ToolKind.WEB_FETCH -> stringResource(R.string.tool_web_fetch)
     ToolKind.CONVERSATION_SEARCH -> stringResource(R.string.tool_search_conversations)
     ToolKind.CONVERSATION_LIST -> stringResource(R.string.tool_list_conversations)
@@ -90,12 +94,16 @@ private fun toolBaseDisplayName(
     ToolKind.LOOP_START -> stringResource(R.string.tool_start_loop)
     ToolKind.LOOP_STOP -> stringResource(R.string.tool_stop_loop)
     ToolKind.MCP -> "MCP"
-    ToolKind.UNKNOWN -> toolName
-        .ifBlank { stringResource(R.string.tool_context) }
-        .split("_")
-        .joinToString(" ") { word ->
-            word.replaceFirstChar { char -> char.uppercaseChar() }
-        }
+    ToolKind.UNKNOWN -> if (toolName == "code_execution") {
+        stringResource(R.string.code_execution)
+    } else {
+        toolName
+            .ifBlank { stringResource(R.string.tool_context) }
+            .split("_")
+            .joinToString(" ") { word ->
+                word.replaceFirstChar { char -> char.uppercaseChar() }
+            }
+    }
 }
 
 @Composable
@@ -370,10 +378,10 @@ private fun completedSummary(
         R.string.tool_delete_memory_default,
     )
     ToolKind.MEMORY_UPDATE_ACTIVE -> stringResource(R.string.tool_update_active_default)
-    ToolKind.WEB_SEARCH -> if (subject == null) {
+    ToolKind.WEB_SEARCH -> if (subject == null || presentation.count == null) {
         stringResource(R.string.tool_web_search_done_default)
     } else {
-        stringResource(R.string.tool_web_search_done, presentation.count ?: 0, subject)
+        stringResource(R.string.tool_web_search_done, presentation.count, subject)
     }
     ToolKind.WEB_FETCH -> optionalSubjectSummary(
         subject,

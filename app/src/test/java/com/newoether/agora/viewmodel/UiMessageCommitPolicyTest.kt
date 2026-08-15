@@ -26,6 +26,21 @@ class UiMessageCommitPolicyTest {
     }
 
     @Test
+    fun replacingOneExistingRowPreservesEverySuffixRow() {
+        val before = message("before", "before")
+        val target = message("target", "old text")
+        val suffix = message("suffix", "must survive")
+        val replacement = target.copy(text = "", status = com.newoether.agora.model.MessageStatus.SENDING)
+
+        val merged = UiMessageCommitPolicy.upsert(
+            existing = listOf(before, target, suffix),
+            committed = listOf(replacement),
+        )
+
+        assertEquals(listOf(before, replacement, suffix), merged)
+    }
+
+    @Test
     fun preexistingDuplicateIds_areCollapsedEvenWithoutReplacement() {
         val duplicate = message("user", "same", Participant.USER)
 

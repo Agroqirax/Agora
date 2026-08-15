@@ -1,8 +1,11 @@
 package com.newoether.agora.ui.chat.message
 
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -11,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -19,9 +21,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
-import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
@@ -33,35 +33,26 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
-import com.newoether.agora.util.NoAutoScrollSelectionContainer
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationPolicy
+import com.newoether.agora.model.CitationRecord
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.model.ThinkingSegmentDisplayModes
+import com.newoether.agora.model.citationRecords
+import com.newoether.agora.ui.chat.GenerationActivityDot
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
 
 internal val AssistantMessageHorizontalInset = 8.dp
-
-private enum class AssistantStatusKind {
-    ACTIVE,
-    THINKING,
-    SUCCESS,
-    STOPPED,
-    INFO,
-}
-
-private data class AssistantStatusPresentation(
-    val text: String,
-    val kind: AssistantStatusKind,
-)
 
 internal data class TokenUsagePresentation(
     val input: Int?,
@@ -97,54 +88,63 @@ internal fun tokenUsagePresentation(
     )
 }
 
+internal enum class AssistantInlineActivityMode {
+    NONE,
+    EMPTY,
+    RETRY,
+}
+
+internal fun assistantInlineActivityMode(
+    generationActive: Boolean,
+    hasAnswer: Boolean,
+    hasVisibleInfoSegment: Boolean,
+    retryText: String?,
+): AssistantInlineActivityMode = when {
+    !generationActive -> AssistantInlineActivityMode.NONE
+    !retryText.isNullOrBlank() -> AssistantInlineActivityMode.RETRY
+    !hasAnswer && !hasVisibleInfoSegment -> AssistantInlineActivityMode.EMPTY
+    else -> AssistantInlineActivityMode.NONE
+}
+
 @Composable
-private fun AssistantStatusRow(status: AssistantStatusPresentation) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(bottom = 6.dp),
-    ) {
-        Box(modifier = Modifier.size(16.dp), contentAlignment = Alignment.Center) {
-            when (status.kind) {
-                AssistantStatusKind.ACTIVE,
-                AssistantStatusKind.THINKING,
-                -> CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    color = if (status.kind == AssistantStatusKind.THINKING) {
-                        MaterialTheme.colorScheme.tertiary
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                    strokeWidth = 2.dp,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                )
-                AssistantStatusKind.SUCCESS -> Icon(
-                    Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.tertiary,
-                )
-                AssistantStatusKind.STOPPED -> Icon(
-                    Icons.Default.Stop,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.error,
-                )
-                AssistantStatusKind.INFO -> Icon(
-                    Icons.Default.Info,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.error,
-                )
-            }
-        }
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            status.text,
-            style = ChatType.meta,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun AssistantInlineActivity(
+    mode: AssistantInlineActivityMode,
+    retryText: String?,
+) {
+    var retainedMode by remember {
+        mutableStateOf(
+            mode.takeUnless { it == AssistantInlineActivityMode.NONE }
+                ?: AssistantInlineActivityMode.EMPTY,
         )
     }
+    var retainedRetryText by remember { mutableStateOf(retryText) }
+    LaunchedEffect(mode, retryText) {
+        if (mode != AssistantInlineActivityMode.NONE) {
+            retainedMode = mode
+            retainedRetryText = retryText
+        }
+    }
+    val visibleMode = if (mode == AssistantInlineActivityMode.NONE) retainedMode else mode
+    val visibleRetryText =
+        if (mode == AssistantInlineActivityMode.NONE) retainedRetryText else retryText
+    AnimatedVisibility(
+        visible = mode != AssistantInlineActivityMode.NONE,
+        enter = EnterTransition.None,
+        exit = fadeOut(tween(320, easing = FastOutSlowInEasing)),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 6.dp),
+        ) {
+            if (visibleMode == AssistantInlineActivityMode.RETRY) {
+                RetryActivityIndicator(label = visibleRetryText.orEmpty() + "...")
+            } else {
+                GenerationActivityDot()
+            }
+        }
+    }
 }
+
 
 /**
  * The left-aligned assistant (and error) message content: the streaming status header,
@@ -175,6 +175,7 @@ internal fun AssistantMessageContent(
     groupedSegmentAutoExpansionController: GroupedSegmentAutoExpansionController,
     thoughtExpandedStates: SnapshotStateMap<String, Boolean>,
     renderContext: ChatMarkdownRenderContext,
+    searchHighlight: SearchHighlightSpec?,
     branchIndex: Int,
     totalBranches: Int,
     onSwitchBranch: (Int) -> Unit,
@@ -192,6 +193,35 @@ internal fun AssistantMessageContent(
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
     val haptics = LocalAgoraHaptics.current
+    val uriHandler = LocalUriHandler.current
+    val citations = remember(message.text, message.segments) {
+        message.citationRecords()
+    }
+    var selectedCitation by remember(message.id) { mutableStateOf<CitationRecord?>(null) }
+    var showCitationSources by remember(message.id) { mutableStateOf(false) }
+    var groupedCitationSources by remember(message.id) {
+        mutableStateOf<List<CitationRecord>?>(null)
+    }
+    val onSingleCitationActivate: (CitationRecord) -> Unit = { source ->
+        val safeUrl = CitationPolicy.safeHttpUrl(source.url)
+        if (safeUrl == null || runCatching { uriHandler.openUri(safeUrl) }.isFailure) {
+            selectedCitation = source
+        }
+    }
+    val onCitationActivate: (List<CitationRecord>) -> Unit = { sources ->
+        if (sources.size > 1) {
+            showCitationSources = false
+            groupedCitationSources = sources
+        } else {
+            sources.singleOrNull()?.let(onSingleCitationActivate)
+        }
+    }
+    selectedCitation?.let { source ->
+        CitationSourceDetailDialog(
+            source = source,
+            onDismiss = { selectedCitation = null },
+        )
+    }
     var showMenu by remember(message.id) { mutableStateOf(false) }
     var regenerateRequested by remember(message.id) { mutableStateOf(false) }
     var observedRegenerationExit by remember(message.id) { mutableStateOf(false) }
@@ -206,8 +236,43 @@ internal fun AssistantMessageContent(
         }
     }
     val regenerationActionsExiting = regenerateRequested || isRegenerationExiting
-    LaunchedEffect(regenerationActionsExiting) {
+    val actionAvailability = assistantActionAvailability(
+        isStreaming = isStreaming,
+        isLoading = isLoading,
+        regenerateRequested = regenerationActionsExiting,
+    )
+    val sourcesSummaryVisible = citationSummaryVisible(
+        showActions = showActions,
+        informationVisible = actionAvailability.informationVisible,
+        sourceCount = citations.size,
+    )
+    LaunchedEffect(regenerationActionsExiting, sourcesSummaryVisible) {
         if (regenerationActionsExiting) showMenu = false
+        if (!sourcesSummaryVisible) showCitationSources = false
+    }
+    if (showCitationSources) {
+        CitationSourcesBottomSheet(
+            messageId = message.id,
+            citations = citations,
+            searchSpec = searchHighlight,
+            onActivate = { source ->
+                haptics.confirm()
+                onSingleCitationActivate(source)
+            },
+            onDismiss = { showCitationSources = false },
+        )
+    }
+    groupedCitationSources?.let { groupedSources ->
+        CitationSourcesBottomSheet(
+            messageId = message.id,
+            citations = groupedSources,
+            searchSpec = searchHighlight,
+            onActivate = { source ->
+                haptics.confirm()
+                onSingleCitationActivate(source)
+            },
+            onDismiss = { groupedCitationSources = null },
+        )
     }
     // During generation, eat horizontal nested-scroll so code blocks
     // cannot be panned. Vertical scroll and taps (thinking header,
@@ -219,6 +284,10 @@ internal fun AssistantMessageContent(
                 Offset(available.x, 0f)
         }
     }
+    val segmentsOrNull = message.segments
+    val mergedSegments = remember(segmentsOrNull) {
+        mergeAdjacentSegments(segmentsOrNull.orEmpty())
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -227,86 +296,25 @@ internal fun AssistantMessageContent(
             .then(if (isStreaming) Modifier.nestedScroll(horizontalScrollEater) else Modifier)
     ) {
         Column {
-            // Status Header
             if (message.participant == Participant.MODEL) {
-                val thinkingStatus = stringResource(R.string.thinking_ellipsis)
-                val answeringStatus = stringResource(R.string.answering_ellipsis)
-                val thinkingNow = message.status == MessageStatus.THINKING
-                val isToolCalling = message.status == MessageStatus.TOOL_CALLING
-                val isTranscribing = message.status == MessageStatus.TRANSCRIBING
-                val hasInFlightStatus = message.status == MessageStatus.SENDING ||
-                    thinkingNow || isToolCalling || isTranscribing
-                val hasActiveAnswer = message.hasActiveAnswerSegment()
-                val toolCallingStatus = stringResource(R.string.tool_calling_ellipsis)
-                val transcribingStatus = stringResource(R.string.transcription_ellipsis)
-                val failedStatus = stringResource(R.string.failed_to_generate)
-                val detailedUsage = if (detailedTokenUsage) {
-                    tokenUsagePresentation(message.tokenUsage)
-                        .takeIf { it.input != null || it.output != null }
-                } else {
-                    null
-                }
-                val completedUsageText = detailedUsage?.let { usage ->
-                    val input = usage.input?.toString() ?: "—"
-                    val output = usage.output?.toString() ?: "—"
-                    if (usage.cachedInput != null) {
-                        stringResource(
-                            R.string.token_usage_detail_cached,
-                            input,
-                            usage.cachedInput.toString(),
-                            output,
-                        )
-                    } else {
-                        stringResource(
-                            R.string.token_usage_detail,
-                            input,
-                            output,
-                        )
-                    }
-                } ?: stringResource(
-                    R.string.cost_tokens,
-                    message.tokenCount.coerceAtLeast(0),
+                val generationActive = isStreaming ||
+                    message.status == MessageStatus.SENDING ||
+                    message.status == MessageStatus.THINKING ||
+                    message.status == MessageStatus.TOOL_CALLING ||
+                    message.status == MessageStatus.TRANSCRIBING
+                val activityMode = assistantInlineActivityMode(
+                    generationActive = generationActive,
+                    hasAnswer =
+                        message.text.isNotBlank() ||
+                            mergedSegments.any { it.isVisibleAnswerSegment() },
+                    hasVisibleInfoSegment = mergedSegments.any { it.isInfoSegment() },
+                    retryText = message.retryText,
                 )
-                val displayText = when {
-                    // Keep the header's measured row across stream → terminal even when a
-                    // provider omits usage. Removing it for tokenCount=0 shifts every Markdown
-                    // line upward on the exact frame generation completes.
-                    message.status == MessageStatus.SUCCESS -> completedUsageText
-                    message.status == MessageStatus.STOPPED -> stringResource(R.string.generation_stopped)
-                    message.status == MessageStatus.ERROR -> failedStatus
-                    isStreaming && isTranscribing -> transcribingStatus
-                    isStreaming && isToolCalling -> toolCallingStatus
-                    isStreaming && thinkingNow -> thinkingStatus
-                    isStreaming && hasActiveAnswer -> answeringStatus
-                    isStreaming -> stringResource(R.string.sending_ellipsis)
-                    else -> null
-                }.let { base ->
-                    if (base != null && message.retryText != null) "$base (${message.retryText})"
-                    else base
-                }
-
-                if (displayText != null) {
-                    val statusKind = when {
-                        message.status == MessageStatus.SUCCESS -> AssistantStatusKind.SUCCESS
-                        message.status == MessageStatus.STOPPED -> AssistantStatusKind.STOPPED
-                        (isStreaming || hasInFlightStatus) && thinkingNow ->
-                            AssistantStatusKind.THINKING
-                        isStreaming || hasInFlightStatus -> AssistantStatusKind.ACTIVE
-                        else -> AssistantStatusKind.INFO
-                    }
-                    Crossfade(
-                        targetState = AssistantStatusPresentation(displayText, statusKind),
-                        animationSpec = tween(
-                            durationMillis = STATUS_CROSSFADE_DURATION_MS,
-                            easing = LinearEasing,
-                        ),
-                        label = "assistantStatus:${message.id}",
-                    ) { status ->
-                        AssistantStatusRow(status)
-                    }
-                }
+                AssistantInlineActivity(
+                    mode = activityMode,
+                    retryText = message.retryText,
+                )
             }
-
             // GenerationManager already publishes a bounded stream cadence. A second UI debounce
             // delayed every chunk, retained a stale text job through Stop, and then replaced the
             // whole document at terminalization. Feed the latest immutable snapshot directly to
@@ -321,10 +329,6 @@ internal fun AssistantMessageContent(
                     setThoughtBlockHeight(0)
                 }
 
-                val segmentsOrNull = message.segments
-                val mergedSegments = remember(segmentsOrNull) {
-                    mergeAdjacentSegments(segmentsOrNull.orEmpty())
-                }
                 val failedToGenerateText = stringResource(R.string.failed_to_generate)
                 val errorContent = remember(
                     message.text,
@@ -382,6 +386,8 @@ internal fun AssistantMessageContent(
                         autoExpansionController = groupedSegmentAutoExpansionController,
                         expandedStates = thoughtExpandedStates,
                         renderContext = renderContext,
+                        citations = citations,
+                        onCitationActivate = onCitationActivate,
                         segmentAppearanceRegistry = segmentAppearanceRegistry,
                         onLayoutMutationStarted = onLayoutMutationStarted,
                         onLayoutMutationSettled = onLayoutMutationSettled,
@@ -428,51 +434,55 @@ internal fun AssistantMessageContent(
                 }
 
                 val answerBodyText = errorContent?.answerText ?: renderedText.takeIf { !isError }
+                val answerProjection = remember(answerBodyText, citations, isStreaming) {
+                    citationMarkdownProjection(
+                        answerText = answerBodyText.orEmpty(),
+                        citations = citations,
+                        isStreaming = isStreaming,
+                    )
+                }
+                val answerContent = answerProjection?.markdown ?: answerBodyText.orEmpty()
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .noOpBringIntoView()
                 ) {
-                    if (!answerBodyText.isNullOrEmpty() && !useTimelineSegments) {
-                        if (compactAnswerAppearanceKey != null) {
-                            AnimatedTimelineBlockAppearance(
-                                animationKey = compactAnswerAppearanceKey,
-                                appearanceRegistry = segmentAppearanceRegistry,
-                                isStreaming = isStreaming,
-                            ) {
-                                ChatStreamingMarkdown(
-                                    content = answerBodyText,
+                    if (answerContent.isNotEmpty() && !useTimelineSegments) {
+                        CitationInlineContentHost(
+                            projection = answerProjection,
+                            onActivate = onCitationActivate,
+                        ) {
+                            if (compactAnswerAppearanceKey != null) {
+                                AnimatedTimelineBlockAppearance(
+                                    animationKey = compactAnswerAppearanceKey,
+                                    appearanceRegistry = segmentAppearanceRegistry,
+                                    isStreaming = isStreaming,
+                                ) {
+                                    StreamingMarkdownMessage(
+                                        content = answerContent,
+                                        isStreaming = isStreaming,
+                                        renderContext = renderContext,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        selectionEnabled = !isStreaming,
+                                    )
+                                }
+                            } else {
+                                StreamingMarkdownMessage(
+                                    content = answerContent,
                                     isStreaming = isStreaming,
                                     renderContext = renderContext,
                                     modifier = Modifier.fillMaxWidth(),
                                     selectionEnabled = !isStreaming,
                                 )
                             }
-                        } else {
-                            ChatStreamingMarkdown(
-                                content = answerBodyText,
-                                isStreaming = isStreaming,
-                                renderContext = renderContext,
-                                modifier = Modifier.fillMaxWidth(),
-                                selectionEnabled = !isStreaming,
-                            )
                         }
                     }
                 }
                 if (errorContent != null) {
-                    Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-                            Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.error)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            NoAutoScrollSelectionContainer {
-                                Text(
-                                    errorContent.errorText,
-                                    style = ChatType.errorBody,
-                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                                )
-                            }
-                        }
-                    }
+                    GenerationErrorBar(errorContent.errorText)
+                }
+                if (!isStreaming && message.status == MessageStatus.STOPPED) {
+                    StoppedGenerationBar(hasBodyContent = renderedText.isNotEmpty())
                 }
                 if (message.participant == Participant.MODEL && message.images.isNotEmpty()) {
                     val genImages = message.images
@@ -502,11 +512,6 @@ internal fun AssistantMessageContent(
                     }
                 }
                 if (message.participant == Participant.MODEL && showActions) {
-                    val actionAvailability = assistantActionAvailability(
-                        isStreaming = isStreaming,
-                        isLoading = isLoading,
-                        regenerateRequested = regenerationActionsExiting,
-                    )
                     val informationActionsAlpha by animateFloatAsState(
                         targetValue = if (actionAvailability.informationVisible) 1f else 0f,
                         animationSpec = tween(
@@ -541,6 +546,21 @@ internal fun AssistantMessageContent(
                         MaterialTheme.colorScheme.error.copy(
                             alpha = if (actionAvailability.terminalEnabled) 1f else 0.38f
                         )
+                    if (citations.isNotEmpty()) {
+                        CitationSourcesSummaryCapsule(
+                            messageId = message.id,
+                            citations = citations,
+                            searchSpec = searchHighlight,
+                            visible = sourcesSummaryVisible,
+                            enabled = sourcesSummaryVisible,
+                            onClick = {
+                                groupedCitationSources = null
+                                showCitationSources = true
+                            },
+                            modifier = Modifier
+                                .padding(top = 12.dp),
+                        )
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

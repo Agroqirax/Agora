@@ -35,16 +35,6 @@ sealed interface RunEffect {
     data class CommitToolRound(val identity: RunEffectIdentity) : RunEffect
     data class ContinueProviderPass(val identity: RunEffectIdentity) : RunEffect
     data class ToolRoundCommitFailed(val identity: RunEffectIdentity) : RunEffect
-    data class RunCompact(
-        val identity: RunEffectIdentity,
-        val compactRunId: String,
-    ) : RunEffect {
-        init {
-            require(compactRunId.isNotBlank())
-            require(identity.runId == compactRunId)
-        }
-    }
-    data class CompactFailed(val identity: RunEffectIdentity) : RunEffect
     data class FinalizeRun(
         val identity: RunEffectIdentity,
         val status: RunStatus,

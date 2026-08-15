@@ -211,6 +211,14 @@ object DeveloperDiagnostics {
                 attributes = mapOf("chars" to text.length.toString()),
                 content = captureParsedContent(text, mode),
             )
+            is StreamEvent.CitationUpdate -> ParsedEventDetails(
+                eventType = "CitationUpdate",
+                attributes = mapOf(
+                    "provider" to DiagnosticRedactor.safeIdentifier(citation.provider),
+                    "kind" to DiagnosticRedactor.safeIdentifier(citation.kind),
+                    "anchors" to citation.anchors.size.toString(),
+                ),
+            )
             is StreamEvent.ThoughtChunk -> ParsedEventDetails(
                 eventType = "ThoughtChunk",
                 attributes = mapOf(
@@ -233,6 +241,17 @@ object DeveloperDiagnostics {
                 eventType = "Error",
                 attributes = mapOf("errorType" to error.javaClass.simpleName),
                 content = captureParsedContent(message, mode),
+            )
+            is StreamEvent.HostedToolCallUpdate -> ParsedEventDetails(
+                eventType = "HostedToolCallUpdate",
+                attributes = mapOf(
+                    "streamKey" to DiagnosticRedactor.safeIdentifier(streamKey),
+                    "name" to DiagnosticRedactor.safeIdentifier(name),
+                    "argumentChars" to arguments.length.toString(),
+                    "resultChars" to (result?.length ?: 0).toString(),
+                    "isError" to isError.toString(),
+                ),
+                content = captureParsedContent(result ?: arguments, mode),
             )
             is StreamEvent.ToolCallUpdate -> ParsedEventDetails(
                 eventType = "ToolCallUpdate",

@@ -77,6 +77,8 @@ internal fun ApiGenerateContentRequest.requireValidWireFormat(modelName: String)
                 part.text,
                 part.inlineData,
                 part.thought,
+                part.executableCode,
+                part.codeExecutionResult,
                 part.functionCall,
                 part.functionResponse,
             ).size
@@ -87,6 +89,16 @@ internal fun ApiGenerateContentRequest.requireValidWireFormat(modelName: String)
             part.inlineData?.let {
                 if (content.role != "user" || it.mimeType.isBlank() || it.data.isBlank()) {
                     violations += "$partLocation is not a valid user inlineData part"
+                }
+            }
+            part.executableCode?.let { code ->
+                if (content.role != "model" || code.language.isBlank() || code.code.isBlank()) {
+                    violations += "$partLocation is not valid model executableCode"
+                }
+            }
+            part.codeExecutionResult?.let { result ->
+                if (content.role != "model" || result.outcome.isBlank()) {
+                    violations += "$partLocation is not valid model codeExecutionResult"
                 }
             }
             part.functionCall?.let { call ->
@@ -144,6 +156,8 @@ private fun ApiGenerateContentRequest.validateSystemInstruction(
                         it.functionResponse,
                         it.thought,
                         it.thoughtSignature,
+                        it.executableCode,
+                        it.codeExecutionResult,
                     ).isNotEmpty()
             }
         ) {

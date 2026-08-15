@@ -1,6 +1,11 @@
 # Context Compact requirements
 
-Status: authoritative product and audit baseline, 2026-08-10.
+Status: authoritative product baseline, updated 2026-08-13.
+
+The global message-generation, fresh-Run, UI-boundary, and Provider context-boundary contracts are
+owned by `development/message-generation.md`. This document defines Compact product behavior and
+must be read consistently with that global contract; it cannot create a Compact-specific lifecycle
+or boundary definition.
 
 ## 1. Context settings and estimation
 
@@ -14,7 +19,7 @@ A logical message is counted after canonical consecutive-role merging. Tool call
 
 ## 2. Non-destructive boundary
 
-Compact persists one visible capsule in the conversation graph and never deletes original messages. The nearest capsule on the selected branch is the sole API context boundary. Deleting it restores the preceding boundary while preserving the original graph.
+Compact persists one visible capsule in the conversation graph and never deletes original messages. Walking upward from the latest selected message, the nearest Compact whose generation ended normally with `SUCCESS` is the sole API context boundary; ERROR, STOPPED, and in-flight Compact rows are ignored. Deleting a successful capsule restores the preceding successful boundary while preserving the original graph.
 
 Compact summarizes only the older prefix. The configured last N logical messages remain verbatim after the boundary, in original order and with complete tool rounds. Effective provider context is:
 
@@ -24,7 +29,7 @@ If the older prefix is empty, Compact does not run.
 
 ## 3. Compact is a standard generation
 
-Compact is not a specialized non-generation state. It acquires the same per-conversation generation slot, Run ownership, Stop/cancellation lifecycle, overlay projection, queue boundary, and completion barriers as ordinary model generation. Compact-specific branching is limited to the identified reducer effect/subtype, request construction, continuation intent, and the atomic Compact-boundary database operation; it must not create a parallel composer lifecycle.
+Compact is an ordinary standard generation. Every automatic, manual, or Recompact admission creates a fresh Run and uses the same request/context builder, Provider execution, streaming/checkpoint, Stop/cancellation, overlay, queue, terminal settlement, and recovery pipeline as ordinary model generation. Compact-specific data is limited to its message identity/UI, haptic exclusion, selected frozen generation parameters, tools disabled, system prompt, retained-summary final text, and (for Recompact) the existing output row target. It must not create a reducer subtype, Provider runner, context builder, settlement path, or parallel composer lifecycle.
 
 Composer invariants:
 
@@ -35,7 +40,7 @@ Composer invariants:
 - Stop has its ordinary meaning: cancel the active Compact generation, settle coroutine and durable state, then drain retained queued guidance through the normal boundary.
 - The generating-state activity dot used for an ordinary assistant response must not be projected as a second Compact-specific white dot.
 
-Automatic pre-send Compact follows the same rule. When a user send crosses the threshold, create and run the Compact generation first, accept the user content into the normal queue exactly once, then automatically persist/send it after Compact completes. Tool-continuation Compact similarly resumes the already pending provider continuation after completion.
+Automatic pre-send Compact follows the same rule. When a user send crosses the threshold, create and run the Compact generation first, accept the user content into the normal queue exactly once, then automatically persist/send it after Compact completes. After a durable tool result, ordering is `Compact -> FIFO queued user message -> loop`; a no-input loop may continue only when no pending or claimed guidance exists.
 
 No caller may hold a second conversation/automation lock while waiting for the generation slot. Every result is fenced by conversation, Run, pass, owner, and effect identity; stale results cannot mutate UI or graph state.
 
@@ -49,7 +54,7 @@ Deletion does not select or scroll to a target. The shared message-deletion pipe
 
 ## 5. Capsule interaction
 
-A newly created Compact capsule enters once with the established fade-in plus scale-in animation. Recomposition, branch restoration, and ordinary list refresh must not replay the entrance.
+A newly created Compact capsule enters once with the shared draw-only fade animation and no scale change. Its outer padding, minimum height, icon slot, label line count, and action slot remain stable across progress and terminal states. Recomposition, branch restoration, and ordinary list refresh must not replay the entrance.
 
 Opening capsule details uses the same loading contract as a thinking-segment bottom sheet:
 
@@ -86,7 +91,7 @@ Regression coverage must include:
 - attached and detached scrolling;
 - assistant-style bottom padding;
 - immediate bottom-sheet presentation and delayed progress;
-- one-shot fade/scale capsule entrance;
+- one-shot fade-only capsule entrance and stable vertical bounds across progress/terminal states;
 - shared rounded/icon menu and destructive red Delete;
 - Compact deletion with haptics/overlay, bounded rewiring, `scrollToTarget=false`, and preserved scroll position;
 - Stop, cancellation, stale result, branch change, and process-recovery paths.

@@ -65,6 +65,19 @@ class GeminiStreamTerminationTest {
     }
 
     @Test
+    fun terminalMarkerCannotCompletePendingCodeExecution() {
+        val termination = geminiStreamTermination(
+            sawDone = true,
+            finishReason = "stop",
+            producedContent = true,
+            toolCallInFlight = true,
+        )
+
+        assertFalse(termination.isRetryable)
+        assertTrue(termination.toError("Gemini") is GenerationError.IncompleteStream)
+    }
+
+    @Test
     fun terminalMarkerCannotCompleteAnInvalidOpenFunctionCall() {
         val error = GenerationError.SseParse(
             rawLine = "functionCall",

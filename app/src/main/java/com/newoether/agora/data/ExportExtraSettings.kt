@@ -56,6 +56,7 @@ object ExportExtraSettings {
                 presencePenalty = s["presencePenalty"]?.jsonPrimitive?.float,
                 codeExecutionEnabled = s["codeExecutionEnabled"]?.jsonPrimitive?.boolean,
                 googleSearchEnabled = s["googleSearchEnabled"]?.jsonPrimitive?.boolean,
+                openAiWebSearchEnabled = s["openAiWebSearchEnabled"]?.jsonPrimitive?.boolean,
                 thinkingEnabled = s["thinkingEnabled"]?.jsonPrimitive?.boolean,
                 thinkingLevel = s["thinkingLevel"]?.jsonPrimitive?.contentOrNull?.let { ThinkingLevels.normalize(it) },
                 thinkingBudgetEnabled = s["thinkingBudgetEnabled"]?.jsonPrimitive?.boolean

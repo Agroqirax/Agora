@@ -59,29 +59,6 @@ class ConversationRuntimeResourceOwnershipTest {
     }
 
     @Test
-    fun coherentSnapshotUsesAuthoritativeRunStateForCompactEligibility() {
-        val resources = activeResources()
-        resources.streamUpdate(OWNER_TOKEN, message(MessageStatus.SENDING))
-        resources.loadingChange(OWNER_TOKEN, true)
-        resources.publishGenerationSnapshot(
-            RunState.Compacting(
-                compactRunId = "compact",
-                effectIdentity = com.newoether.agora.model.RunEffectIdentity(
-                    conversationId = "conversation",
-                    ownerToken = OWNER_TOKEN,
-                    runId = "compact",
-                    pass = 0,
-                    effectId = "compact-effect",
-                ),
-            ),
-        )
-
-        assertTrue(resources.generationSnapshot.value.isCompacting)
-        assertTrue(resources.generationSnapshot.value.isLoading)
-        assertEquals(MessageStatus.SENDING, resources.generationSnapshot.value.streamingMessage?.status)
-    }
-
-    @Test
     fun generationJobAndStreamsHaveOneCancellableResourceOwner() {
         val resources = ConversationRuntimeResources()
         val installed = Job()

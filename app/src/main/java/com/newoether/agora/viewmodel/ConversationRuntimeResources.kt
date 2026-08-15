@@ -3,10 +3,8 @@ package com.newoether.agora.viewmodel
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.RunEffect
-import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RunState
 import com.newoether.agora.model.RuntimeRunIdentity
-import com.newoether.agora.model.SlotReleaseReason
 import com.newoether.agora.model.Transition
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,7 +22,6 @@ data class ConversationGenerationSnapshot(
     val streamingMessage: ChatMessage? = null,
     val isLoading: Boolean = false,
     val isGenerating: Boolean = false,
-    val isCompacting: Boolean = false,
 )
 
 /**
@@ -49,21 +46,13 @@ internal class ConversationRuntimeResources {
     private val _stopping = MutableStateFlow(false)
     val stopping: StateFlow<Boolean> = _stopping.asStateFlow()
 
-    private val _compacting = MutableStateFlow(false)
-    val compacting: StateFlow<Boolean> = _compacting.asStateFlow()
-
-    private val _compactPreview = MutableStateFlow("")
-    val compactPreview: StateFlow<String> = _compactPreview.asStateFlow()
-
     private val _generationSnapshot = MutableStateFlow(ConversationGenerationSnapshot())
     val generationSnapshot: StateFlow<ConversationGenerationSnapshot> =
         _generationSnapshot.asStateFlow()
-    private var compactPreviewIdentity: RunEffectIdentity? = null
-
     private var generationJob: Job? = null
     private var uiGenToken = 0L
     private val persistId = AtomicLong(0L)
-    private var suppressNextQueueDrain = false
+    private var suppressedQueueDrainCount = 0
 
     fun captureUiToken(): Long = uiGenToken
 
@@ -98,24 +87,6 @@ internal class ConversationRuntimeResources {
         var activated = false
         var released = false
 
-        transition.effects.filterIsInstance<RunEffect.RunCompact>()
-            .singleOrNull()
-            ?.let { effect ->
-                val compactState = currentState as? RunState.Compacting
-                    ?: error("RunCompact must enter Compacting")
-                check(compactState.effectIdentity == effect.identity)
-                check(compactState.compactRunId == effect.compactRunId)
-                activate(compactState.generationIdentity, loading = true)
-                activated = true
-                compactPreviewIdentity = effect.identity
-                _compactPreview.value = ""
-                _compacting.value = true
-            }
-        if (currentState !is RunState.Compacting && _compacting.value) {
-            compactPreviewIdentity = null
-            _compactPreview.value = ""
-            _compacting.value = false
-        }
 
         transition.effects.filterIsInstance<RunEffect.PersistAcceptedInput>()
             .singleOrNull()
@@ -152,9 +123,6 @@ internal class ConversationRuntimeResources {
                 check(currentState is RunState.Idle) {
                     "ReleaseSlot resource cleanup requires an Idle runtime state"
                 }
-                if (release.reason == SlotReleaseReason.STOP_BARRIERS_SETTLED) {
-                    suppressNextQueueDrain = false
-                }
                 release()
                 released = true
             }
@@ -165,7 +133,6 @@ internal class ConversationRuntimeResources {
     fun stoppableOverlay(currentState: RunState): ChatMessage? = _streamingMessage.value
         ?.takeUnless {
             currentState is RunState.Idle ||
-                currentState is RunState.Compacting ||
                 currentState is RunState.Finalizing && !currentState.persistenceFailureReported
         }
         ?.copy(status = MessageStatus.STOPPED)
@@ -176,12 +143,6 @@ internal class ConversationRuntimeResources {
 
     fun loadingChange(uiToken: Long, value: Boolean) {
         if (this.uiGenToken == uiToken) _isLoading.value = value
-    }
-
-    fun updateCompactPreview(identity: RunEffectIdentity, text: String): Boolean {
-        if (compactPreviewIdentity != identity) return false
-        _compactPreview.value = text
-        return true
     }
 
     fun streamMessageForClear(uiToken: Long): ChatMessage? = _streamingMessage.value
@@ -198,13 +159,18 @@ internal class ConversationRuntimeResources {
     }
 
     fun deferNextQueueDrain() {
-        suppressNextQueueDrain = true
+        check(suppressedQueueDrainCount < Int.MAX_VALUE)
+        suppressedQueueDrainCount += 1
+    }
+
+    fun cancelDeferredQueueDrain() {
+        if (suppressedQueueDrainCount > 0) suppressedQueueDrainCount -= 1
     }
 
     fun consumeQueueDrainPermission(): Boolean {
-        val allowed = !suppressNextQueueDrain
-        suppressNextQueueDrain = false
-        return allowed
+        if (suppressedQueueDrainCount == 0) return true
+        suppressedQueueDrainCount -= 1
+        return false
     }
 
     fun cancelStreamsAnd(job: Job?) {
@@ -218,7 +184,6 @@ internal class ConversationRuntimeResources {
             streamingMessage = _streamingMessage.value,
             isLoading = _isLoading.value,
             isGenerating = _generating.value,
-            isCompacting = currentState is RunState.Compacting,
         )
     }
 
@@ -227,8 +192,5 @@ internal class ConversationRuntimeResources {
         _isLoading.value = false
         _generating.value = false
         _stopping.value = false
-        compactPreviewIdentity = null
-        _compactPreview.value = ""
-        _compacting.value = false
     }
 }

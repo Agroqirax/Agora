@@ -63,12 +63,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.modelAliasDisplayName
 import com.newoether.agora.data.providerDisplayName
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.automation.ScheduleType
 import com.newoether.agora.automation.TaskSchedule
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.ModelId
-import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.settings.SettingsItem
 import java.text.DateFormatSymbols
 import java.util.Calendar
@@ -488,6 +489,7 @@ internal fun DayOfMonthDialog(
 @Composable
 internal fun ExecutionRow(
     execution: com.newoether.agora.automation.TaskManager.ExecutionSummary,
+    customProviders: List<CustomProviderConfig>,
     shape: RoundedCornerShape,
     onClick: () -> Unit,
     menuEnabled: Boolean,
@@ -512,11 +514,16 @@ internal fun ExecutionRow(
         val formattedTime = remember(execution.timestamp) {
             if (execution.timestamp == 0L) "" else formatDateTime(execution.timestamp)
         }
+        val displayTitle = replaceCustomProviderIdsForDisplay(
+            execution.conversation.title,
+            customProviders,
+        )
+        val displayPreview = replaceCustomProviderIdsForDisplay(execution.preview, customProviders)
         SettingsItem(
             headlineContent = {
                 Text(
-                    text = execution.conversation.title.ifBlank {
-                        execution.preview.ifBlank { statusText }
+                    text = displayTitle.ifBlank {
+                        displayPreview.ifBlank { statusText }
                     },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -535,10 +542,10 @@ internal fun ExecutionRow(
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
-                    if (execution.preview.isNotBlank()) {
+                    if (displayPreview.isNotBlank()) {
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = execution.preview,
+                            text = displayPreview,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -615,7 +622,7 @@ internal fun ModelPickerDialog(
                 items(enabledModels, key = { it }) { model ->
                     val parsed = ModelId.parse(model)
                     ChoiceRow(
-                        label = modelAliases[model] ?: parsed.apiModelName,
+                        label = modelAliasDisplayName(model, modelAliases, customProviders),
                         sub = providerDisplayName(parsed.providerName, customProviders),
                         selected = selected == model,
                         onClick = { onSelect(model) },

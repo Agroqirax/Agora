@@ -1,7 +1,13 @@
 package com.newoether.agora.data
 
+import com.newoether.agora.model.AttachmentMeta
+import com.newoether.agora.model.ChatConversation
+import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.ModelId
+import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.model.apiModelName
+import com.newoether.agora.util.SnackbarEvent
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import java.util.UUID
@@ -19,8 +25,14 @@ internal data class CustomProviderIdentityNormalization(
 /** Pure identity policy shared by DataStore normalization, import, runtime lookup, and tests. */
 internal object CustomProviderIdentityPolicy {
     private const val PREFIX = "custom-provider-"
+    private const val STABLE_ID_PATTERN =
+        "custom-provider-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
     private val stableIdPattern = Regex(
-        "^custom-provider-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        "^$STABLE_ID_PATTERN$",
+        RegexOption.IGNORE_CASE,
+    )
+    private val stableIdInTextPattern = Regex(
+        STABLE_ID_PATTERN,
         RegexOption.IGNORE_CASE,
     )
 
@@ -33,6 +45,13 @@ internal object CustomProviderIdentityPolicy {
     ).toString()
 
     fun isStableId(value: String): Boolean = stableIdPattern.matches(value.trim())
+
+    fun replaceStableIdsForDisplay(
+        text: String,
+        replacement: (String) -> String,
+    ): String = stableIdInTextPattern.replace(text) { match ->
+        replacement(match.value)
+    }
 
     fun normalize(
         rawProviders: List<CustomProviderConfig>,
@@ -167,20 +186,117 @@ internal fun repairOrphanedCustomProviderAliases(
 fun providerDisplayName(
     providerReference: String,
     customProviders: List<CustomProviderConfig>,
-): String = customProviders.firstOrNull { provider ->
-    provider.ownsIdentity(providerReference) || provider.name == providerReference
-}?.name ?: if (CustomProviderIdentityPolicy.isStableId(providerReference)) {
-    "Custom"
-} else {
-    providerReference
+): String {
+    val resolved = customProviders.firstOrNull { provider ->
+        provider.ownsIdentity(providerReference) || provider.name == providerReference
+    }?.name ?: providerReference
+    return CustomProviderIdentityPolicy.replaceStableIdsForDisplay(resolved) { "Custom" }
 }
+
+fun replaceCustomProviderIdsForDisplay(
+    text: String,
+    customProviders: List<CustomProviderConfig>,
+): String = CustomProviderIdentityPolicy.replaceStableIdsForDisplay(text) { providerId ->
+    providerDisplayName(providerId, customProviders)
+}
+
+fun SnackbarEvent.forDisplay(
+    customProviders: List<CustomProviderConfig>,
+): SnackbarEvent = copy(
+    message = replaceCustomProviderIdsForDisplay(message, customProviders),
+    actionLabel = actionLabel?.let {
+        replaceCustomProviderIdsForDisplay(it, customProviders)
+    },
+)
+
+fun ChatConversation.forDisplay(
+    customProviders: List<CustomProviderConfig>,
+): ChatConversation = copy(
+    title = replaceCustomProviderIdsForDisplay(title, customProviders),
+)
+
+private fun String?.replaceCustomProviderIdsForDisplayOrNull(
+    customProviders: List<CustomProviderConfig>,
+): String? = this?.let { replaceCustomProviderIdsForDisplay(it, customProviders) }
+
+fun ChatMessage.forDisplay(
+    customProviders: List<CustomProviderConfig>,
+): ChatMessage = copy(
+    text = replaceCustomProviderIdsForDisplay(text, customProviders),
+    thoughts = thoughts.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+    thoughtTitle = thoughtTitle.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+    toolCall = toolCall?.forDisplay(customProviders),
+    segments = segments?.map { it.forDisplay(customProviders) },
+    attachmentMeta = attachmentMeta?.forDisplay(customProviders),
+    retryText = retryText.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+)
+
+private fun ToolCallData.forDisplay(
+    customProviders: List<CustomProviderConfig>,
+): ToolCallData = copy(
+    toolName = replaceCustomProviderIdsForDisplay(toolName, customProviders),
+    arguments = replaceCustomProviderIdsForDisplay(arguments, customProviders),
+    result = replaceCustomProviderIdsForDisplay(result, customProviders),
+    displayName = displayName.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+    resultText = resultText.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+    structuredResult = structuredResult.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+)
+
+private fun MessageSegment.forDisplay(
+    customProviders: List<CustomProviderConfig>,
+): MessageSegment {
+    if (type == "citation") return this
+    return copy(
+        content = replaceCustomProviderIdsForDisplay(content, customProviders),
+        toolName = toolName.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolArgs = toolArgs.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolResult = toolResult.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolProgress = toolProgress.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolTarget = toolTarget.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolDisplayName = toolDisplayName.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolResultText = toolResultText.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolStructuredResult = toolStructuredResult.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+    )
+}
+
+private fun AttachmentMeta.forDisplay(
+    customProviders: List<CustomProviderConfig>,
+): AttachmentMeta = copy(
+    items = items.map { item ->
+        item.copy(
+            fileName = item.fileName.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+            warning = item.warning.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+            textContent = item.textContent.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+            transcription = item.transcription.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        )
+    },
+)
+
+fun modelApiDisplayName(
+    modelId: String,
+    customProviders: List<CustomProviderConfig>,
+): String = replaceCustomProviderIdsForDisplay(
+    ModelId.parse(modelId).apiModelName,
+    customProviders,
+)
+
+fun modelAliasDisplayName(
+    modelId: String,
+    aliases: Map<String, String>,
+    customProviders: List<CustomProviderConfig>,
+): String = aliases[modelId]
+    ?.takeIf(String::isNotBlank)
+    ?.let { replaceCustomProviderIdsForDisplay(it, customProviders) }
+    ?: modelApiDisplayName(modelId, customProviders)
 
 fun modelDisplayName(
     modelId: String,
     aliases: Map<String, String>,
     customProviders: List<CustomProviderConfig>,
 ): String {
-    aliases[modelId]?.takeIf(String::isNotBlank)?.let { return it }
+    aliases[modelId]?.takeIf(String::isNotBlank)?.let {
+        return modelAliasDisplayName(modelId, aliases, customProviders)
+    }
     val parsed = ModelId.parse(modelId)
-    return "${parsed.apiModelName} (${providerDisplayName(parsed.providerName, customProviders)})"
+    return "${modelApiDisplayName(modelId, customProviders)} (${providerDisplayName(parsed.providerName, customProviders)})"
 }

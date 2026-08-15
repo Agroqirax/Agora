@@ -58,7 +58,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.service.AppForegroundTracker
-import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.ui.chat.ChatApp
 import com.newoether.agora.ui.chat.FullScreenMediaViewer
 import com.newoether.agora.ui.chat.message.ChatMarkdownCodeBlock
@@ -129,11 +128,10 @@ class MainActivity : ComponentActivity() {
         }
 
         val settingsManager = SettingsManager(applicationContext)
+        val agoraApplication = application as AgoraApplication
         lifecycleScope.launch {
-            val storedVersion = withContext(Dispatchers.IO) {
-                ChatDatabase.getStoredVersion(this@MainActivity)
-            }
-            val needsErrorDialog = storedVersion > ChatDatabase.CURRENT_VERSION
+            val databaseStartupState = agoraApplication.awaitDatabaseStartup()
+            val needsErrorDialog = databaseStartupState is DatabaseStartupState.Blocked
             withContext(Dispatchers.IO) {
                 runCatching {
                     settingsManager.initializeFirstInstallDefaults(
@@ -207,10 +205,12 @@ class MainActivity : ComponentActivity() {
                                     if (!clearingDatabase) {
                                         clearingDatabase = true
                                         databaseScope.launch {
-                                            withContext(Dispatchers.IO) {
-                                                applicationContext.deleteDatabase(ChatDatabase.DB_NAME)
+                                            val cleared = agoraApplication.clearIncompatibleDatabase()
+                                            if (cleared) {
+                                                activity?.recreate()
+                                            } else {
+                                                clearingDatabase = false
                                             }
-                                            activity?.recreate()
                                         }
                                     }
                                 },
@@ -228,7 +228,7 @@ class MainActivity : ComponentActivity() {
 
                     // Create ViewModel via the process-scoped DI container (owned by AgoraApplication),
                     // so the same shared singletons back both the UI and background task execution.
-                    val container = (application as AgoraApplication).container
+                    val container = agoraApplication.requireContainer()
                     val factory = remember { container.chatViewModelFactory() }
                     val viewModel: ChatViewModel = viewModel(factory = factory)
 
@@ -325,7 +325,7 @@ fun MainNavigation(
         val id = notificationTarget ?: return@LaunchedEffect
         try {
             val exists = withContext(Dispatchers.IO) {
-                (appContext as AgoraApplication).container.conversationRepository
+                (appContext as AgoraApplication).requireContainer().conversationRepository
                     .getConversation(id) != null
             }
             if (exists) {
@@ -583,7 +583,7 @@ fun MainNavigation(
                                     .padding(12.dp)
                             ) {
                                 Text(
-                                    text = trace,
+                                    text = viewModel.displayText(trace),
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontFamily = FontFamily(Font(R.font.jetbrains_mono_regular)),
                                         lineHeight = 16.sp
@@ -668,7 +668,9 @@ fun MainNavigation(
         }
     }
 
-    // Sandbox events piped into the same global SnackbarHost.
+    val customProviders by viewModel.settings.customProviders.collectAsState()
+
+    // Keep every flavor-specific snackbar on the same display-only provider-ID boundary.
     // Uses a launch+Job pattern so a new message cancels the
     // previous showSnackbar suspension immediately.
     LaunchedEffect(Unit) {
@@ -679,7 +681,9 @@ fun MainNavigation(
                 snackbarJob?.cancel()
                 snackbarJob = launch {
                     try {
-                        snackbarHostState.showSnackbar(msg)
+                        snackbarHostState.showSnackbar(
+                            viewModel.displayText(msg),
+                        )
                     } finally {
                         snackbarVersion++
                     }

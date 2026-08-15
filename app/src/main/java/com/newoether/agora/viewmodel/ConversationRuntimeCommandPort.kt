@@ -1,6 +1,5 @@
 package com.newoether.agora.viewmodel
 
-import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.ProviderPassResult
 import com.newoether.agora.model.RunEffect
@@ -161,44 +160,5 @@ internal class ConversationRuntimeCommandPort(
         )
     }
 
-    /** Claim one isolated Compact generation from the idle conversation slot. */
-    suspend fun requestCompact(
-        compactRunId: String,
-        effectId: String,
-    ): RunEffect.RunCompact? {
-        require(compactRunId.isNotBlank())
-        require(effectId.isNotBlank())
-        return mailbox.submit(
-            commandFactory = ConversationCommandFactory {
-                ConversationCommand.CompactRequested(
-                    identity = RunEffectIdentity(
-                        conversationId = conversationId,
-                        ownerToken = nextOwnerToken().coerceAtLeast(1),
-                        runId = compactRunId,
-                        pass = 0,
-                        effectId = effectId,
-                    ),
-                    compactRunId = compactRunId,
-                )
-            },
-            cancellationCommand = { transition -> transition.failedCompactCommand() },
-        ).effects.filterIsInstance<RunEffect.RunCompact>().singleOrNull()
-    }
-
-    suspend fun finishCompact(
-        identity: RunEffectIdentity,
-        outcome: CompactOutcome,
-    ): Transition = mailbox.submit(
-        ConversationCommandFactory {
-            ConversationCommand.CompactCompleted(identity, outcome)
-        },
-    )
-
-    private fun Transition.failedCompactCommand(): ConversationCommand.CompactCompleted? =
-        effects.filterIsInstance<RunEffect.RunCompact>()
-            .singleOrNull()
-            ?.let { effect ->
-                ConversationCommand.CompactCompleted(effect.identity, CompactOutcome.FAILED)
-            }
 
 }

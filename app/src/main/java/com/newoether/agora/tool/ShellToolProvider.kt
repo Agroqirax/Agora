@@ -156,6 +156,7 @@ class ShellToolProvider(
     ): Flow<ToolExecutionEvent> {
         return when (name) {
             "execute_shell_command" -> executeShellCommandEvents(arguments, ctx)
+            "wait_for_job" -> waitForShellJobEvents(arguments, ctx)
             "view_image" -> flow {
                 emit(ToolExecutionEvent.Completed(executeViewImage(arguments, ctx)))
             }
@@ -234,16 +235,18 @@ class ShellToolProvider(
                     server = serverName,
                     command = command,
                 )
-            if (!confirmTarget(backend.device, "start background job: $ $command")) {
-                return jsonError(
-                    "execute_shell_command",
-                    "denied_by_user: the user declined to run this background command",
-                    server = backend.device.name,
-                    command = command,
-                )
-            }
             return try {
+                if (!confirmTarget(backend.device, "start background job: $ $command")) {
+                    return jsonError(
+                        "execute_shell_command",
+                        "denied_by_user: the user declined to run this background command",
+                        server = backend.device.name,
+                        command = command,
+                    )
+                }
                 backend.startJob(command, workdir, timeoutMs)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 jsonError(
                     "execute_shell_command",
@@ -251,6 +254,8 @@ class ShellToolProvider(
                     server = backend.device.name,
                     command = command,
                 )
+            } finally {
+                backend.close()
             }
         }
 
@@ -407,6 +412,24 @@ class ShellToolProvider(
         }
     }
 
+    private fun waitForShellJobEvents(
+        arguments: String,
+        ctx: GenerationContext,
+    ): Flow<ToolExecutionEvent> = flow {
+        val serverName = arg(parseToolArgs(arguments), "server")
+        resolveConchDevice(serverName, ctx)?.let { device ->
+            emit(ToolExecutionEvent.TargetResolved(device.name))
+        }
+        emit(ToolExecutionEvent.Progress("Waiting for durable job"))
+        emit(
+            ToolExecutionEvent.Completed(
+                durableJobs.waitForShellJob(arguments, ctx) { snapshot ->
+                    emit(ToolExecutionEvent.OutputSnapshot(snapshot))
+                },
+            ),
+        )
+    }
+
     // ── Durable job mutations ──────────────────────────────
 
     private suspend fun stopShellJob(arguments: String, ctx: GenerationContext): String {
@@ -420,21 +443,25 @@ class ShellToolProvider(
                 conchServerNotFoundMessage(serverName, ctx),
                 server = serverName,
             )
-        if (!confirmTarget(backend.device, "stop background shell job: $jobId")) {
-            return jsonError(
-                "stop_shell_job",
-                "denied_by_user: the user declined to stop this job",
-                server = backend.device.name,
-            )
-        }
         return try {
+            if (!confirmTarget(backend.device, "stop background shell job: $jobId")) {
+                return jsonError(
+                    "stop_shell_job",
+                    "denied_by_user: the user declined to stop this job",
+                    server = backend.device.name,
+                )
+            }
             backend.stopJob(jobId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             jsonError(
                 "stop_shell_job",
                 e.message ?: "Failed to stop shell job",
                 server = backend.device.name,
             )
+        } finally {
+            backend.close()
         }
     }
 
@@ -453,21 +480,21 @@ class ShellToolProvider(
             )
         }
         val serverName = arg(args, "server")
+        val store = imageStore
+            ?: return ToolExecutionResult(
+                text = jsonError(
+                    "view_image",
+                    "Tool image storage is unavailable",
+                    server = serverName,
+                ),
+                isError = true,
+            )
         val backend = getConchBackend(serverName, ctx)
             ?: return ToolExecutionResult(
                 text = jsonError(
                     "view_image",
                     conchServerNotFoundMessage(serverName, ctx),
                     server = serverName,
-                ),
-                isError = true,
-            )
-        val store = imageStore
-            ?: return ToolExecutionResult(
-                text = jsonError(
-                    "view_image",
-                    "Tool image storage is unavailable",
-                    server = backend.device.name,
                 ),
                 isError = true,
             )

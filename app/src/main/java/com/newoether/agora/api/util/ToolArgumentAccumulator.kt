@@ -32,7 +32,10 @@ class ToolArgumentAccumulator(initial: String = "") {
         }
         // A single character is ambiguous (a lone `{` is a plausible increment), so snapshot
         // detection requires enough overlap to actually mean something.
-        if (current.length >= MIN_SNAPSHOT_OVERLAP) {
+        if (
+            current.length >= MIN_SNAPSHOT_OVERLAP &&
+            fragment.length >= MIN_SNAPSHOT_OVERLAP
+        ) {
             if (fragment == current) return
             if (fragment.length > current.length && fragment.startsWith(current)) {
                 builder.setLength(0)
@@ -42,6 +45,11 @@ class ToolArgumentAccumulator(initial: String = "") {
             if (current.startsWith(fragment)) return
         }
         builder.append(fragment)
+    }
+
+    fun replace(value: String) {
+        builder.setLength(0)
+        builder.append(value)
     }
 
     override fun toString(): String = builder.toString()

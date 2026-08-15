@@ -183,7 +183,7 @@ internal object ToolPresentationResolver {
         "edit_memory_file" -> ToolKind.MEMORY_EDIT
         "delete_memory_file" -> ToolKind.MEMORY_DELETE
         "update_active_memory" -> ToolKind.MEMORY_UPDATE_ACTIVE
-        "web_search" -> ToolKind.WEB_SEARCH
+        "web_search", "openai_search", "google_search" -> ToolKind.WEB_SEARCH
         "web_fetch" -> ToolKind.WEB_FETCH
         "search_conversations" -> ToolKind.CONVERSATION_SEARCH
         "list_conversations" -> ToolKind.CONVERSATION_LIST
@@ -192,6 +192,7 @@ internal object ToolPresentationResolver {
         "execute_shell_command" -> ToolKind.SHELL_EXECUTE
         "list_shell_jobs" -> ToolKind.SHELL_JOB_LIST
         "get_shell_job" -> ToolKind.SHELL_JOB_GET
+        "wait_for_job" -> ToolKind.SHELL_JOB_GET
         "stop_shell_job" -> ToolKind.SHELL_JOB_STOP
         "file_read" -> ToolKind.FILE_READ
         "file_write" -> ToolKind.FILE_WRITE

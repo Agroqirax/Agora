@@ -5,6 +5,7 @@ import com.newoether.agora.api.LlmProvider
 import com.newoether.agora.api.ProviderConfig
 import com.newoether.agora.api.StreamEvent
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationRecord
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEffectIdentity
 import kotlinx.coroutines.CancellationException
@@ -18,6 +19,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProviderPassRunnerTest {
+    @Test
+    fun `citation-only stream forwards metadata and completes without tool authority`() = runTest {
+        val event = StreamEvent.CitationUpdate(
+            CitationRecord(
+                sourceId = "citation_source",
+                provider = "test",
+                kind = "url",
+                title = "Source",
+            ),
+        )
+        val forwarded = mutableListOf<StreamEvent>()
+
+        val outcome = runner(listOf(event)).run(IDENTITY, messages(), CONFIG, forwarded::add)
+
+        assertEquals(ProviderPassOutcome.CompletedText(IDENTITY), outcome)
+        assertEquals(listOf(event), forwarded)
+    }
+
     @Test
     fun `closed text stream returns identified CompletedText and forwards events`() = runTest {
         val events = listOf<StreamEvent>(

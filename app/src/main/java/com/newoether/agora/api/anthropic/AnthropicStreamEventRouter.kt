@@ -6,8 +6,10 @@ import com.newoether.agora.api.util.ProviderRetryPolicy
 import com.newoether.agora.api.util.ToolArgumentAccumulator
 import com.newoether.agora.api.util.safeWireToolCallId
 import com.newoether.agora.api.util.safeWireToolName
+import com.newoether.agora.model.CitationPolicy
 import com.newoether.agora.model.TokenUsage
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 internal class AnthropicStreamEventRouter {
@@ -18,12 +20,20 @@ internal class AnthropicStreamEventRouter {
         val arguments: ToolArgumentAccumulator,
     )
 
+    private data class TextBlock(
+        val startIndex: Int,
+        val text: StringBuilder = StringBuilder(),
+        val citations: MutableList<JsonElement> = mutableListOf(),
+    )
+
     private val blockTypes = mutableMapOf<Int, String>()
+    private val textBlocks = mutableMapOf<Int, TextBlock>()
     private val toolBlocks = mutableMapOf<Int, ToolBlock>()
     private val thinkingSignatures = mutableMapOf<Int, String?>()
     private val completedToolCallIds = mutableSetOf<String>()
     private var lastBlockIndex = -1
     private var syntheticIndex = 0
+    private var answerLength = 0
     private var inputTokens: Int? = null
     private var cacheCreationInputTokens = 0
     private var cacheReadInputTokens = 0
@@ -75,8 +85,14 @@ internal class AnthropicStreamEventRouter {
                 val index = indexForStart(event.index)
                 blockTypes[index] = block.type
                 when (block.type) {
-                    "text" -> block.text?.takeIf(String::isNotEmpty)?.let {
-                        add(StreamEvent.TextChunk(it))
+                    "text" -> {
+                        textBlocks[index] = TextBlock(startIndex = answerLength)
+                        block.text?.takeIf(String::isNotEmpty)?.let {
+                            appendText(index, it, this)
+                        }
+                        block.citations.orEmpty().forEach { citation ->
+                            appendCitation(index, citation, this)
+                        }
                     }
 
                     "thinking" -> {
@@ -134,10 +150,16 @@ internal class AnthropicStreamEventRouter {
                         }
                     }
 
+                    "citations_delta" -> {
+                        if (blockTypes[index] == "text") {
+                            delta.citation?.let { appendCitation(index, it, this) }
+                        }
+                    }
+
                     "text_delta" -> {
                         if (blockTypes[index] == "text") {
                             delta.text?.takeIf(String::isNotEmpty)?.let {
-                                add(StreamEvent.TextChunk(it))
+                                appendText(index, it, this)
                             }
                         }
                     }
@@ -148,6 +170,11 @@ internal class AnthropicStreamEventRouter {
 
             "content_block_stop" -> {
                 val index = indexForContinuation(event.index)
+                textBlocks.remove(index)?.let { block ->
+                    block.citations.forEach { citation ->
+                        emitCitation(block, citation, this)
+                    }
+                }
                 toolBlocks.remove(index)?.let { tool ->
                     val invalidCause = tool.invalidCompletionCause()
                     if (invalidCause == null) {
@@ -299,10 +326,49 @@ internal class AnthropicStreamEventRouter {
                 }
             }
 
-            "text" -> delta.text?.takeIf(String::isNotEmpty)?.let {
-                output += StreamEvent.TextChunk(it)
+            "text" -> {
+                delta.citation?.let { appendCitation(index, it, output) }
+                delta.text?.takeIf(String::isNotEmpty)?.let {
+                    appendText(index, it, output)
+                }
             }
         }
+    }
+
+    private fun appendText(
+        index: Int,
+        text: String,
+        output: MutableList<StreamEvent>,
+    ) {
+        val block = textBlocks[index] ?: return
+        block.text.append(text)
+        answerLength += text.length
+        output += StreamEvent.TextChunk(text)
+        block.citations.forEach { citation ->
+            emitCitation(block, citation, output)
+        }
+    }
+
+    private fun appendCitation(
+        index: Int,
+        citation: JsonElement,
+        output: MutableList<StreamEvent>,
+    ) {
+        val block = textBlocks[index] ?: return
+        if (citation in block.citations || block.citations.size >= CitationPolicy.MAX_SOURCES) return
+        block.citations += citation
+        emitCitation(block, citation, output)
+    }
+
+    private fun emitCitation(
+        block: TextBlock,
+        citation: JsonElement,
+        output: MutableList<StreamEvent>,
+    ) {
+        citation.toAnthropicCitationRecord(
+            answerStartIndex = block.startIndex,
+            answerText = block.text.toString(),
+        )?.let { output += StreamEvent.CitationUpdate(it) }
     }
 
     private fun indexForStart(index: Int?): Int {

@@ -51,7 +51,8 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * Ordinary foreground Send, queued-guidance placement, and headless Task/Loop Send enter
  * [commands]' sequential mailbox port. [acquireForSend] remains only as a legacy test adapter;
- * [tryAcquireForReplacement] remains the idle-only regenerate/edit adapter. [endGeneration] and
+ * [tryAcquireForReplacement] is the idle-only ordinary continuation/replacement adapter.
+ * [endGeneration] and
  * [stop] submit through the same mailbox. [endGeneration] releases token-gated ownership; Stop
  * establishes the terminal cutoff, then cancels only this conversation's owned generation Job and
  * in-flight HTTP streams (via [streamScope]).
@@ -73,8 +74,6 @@ class ConversationGenerationState(
     val isLoading = resources.isLoading
     val generating = resources.generating
     val stopping = resources.stopping
-    val compacting = resources.compacting
-    val compactPreview = resources.compactPreview
     val generationSnapshot = resources.generationSnapshot
     val queuedSends = guidanceLeases.queuedSends
 
@@ -86,7 +85,7 @@ class ConversationGenerationState(
     /** Authoritative process-slot state. All mutations go through [ConversationRuntimeReducer]. */
     private var runState: RunState = RunState.Idle(conversationId)
     private val runtimeTrace = ConversationRuntimeTrace()
-    /** Foreground/headless Send, Stop, tool-effect, and Compact lifecycle commands enter here. */
+    /** Foreground/headless Send, Stop, and tool-effect lifecycle commands enter here. */
     private val commandMailbox = ConversationCommandMailbox(scope, ::reduceMailboxCommand)
     internal val commands = ConversationRuntimeCommandPort(
         conversationId = conversationId,
@@ -166,27 +165,6 @@ class ConversationGenerationState(
         generating.first { isGenerating -> !isGenerating }
     }
 
-    /** Identified UI-only Compact snapshot; stale effects cannot alter the active preview. */
-    fun updateCompactPreview(identity: RunEffectIdentity, text: String): Boolean =
-        synchronized(genLock) { resources.updateCompactPreview(identity, text) }
-
-    /**
-     * Echoes the exact Compact result and requests the same FIFO queue drain used by an ordinary
-     * generation whenever a manual/pre-send Compact releases the generation slot.
-     */
-    suspend fun finishCompact(
-        identity: RunEffectIdentity,
-        outcome: com.newoether.agora.model.CompactOutcome,
-    ): Transition = withContext(NonCancellable) {
-        val transition = commands.finishCompact(identity, outcome)
-        if (
-            transition.accepted &&
-            transition.effects.any { effect -> effect is RunEffect.ReleaseSlot }
-        ) {
-            onQueueDrainRequested?.invoke(this@ConversationGenerationState)
-        }
-        transition
-    }
 
     // ── Generation slot (single source of truth: [runState] under [genLock]) ─────────────
     // The reducer-backed slot is the atomic decision point for "launch now vs enqueue": exactly
@@ -215,7 +193,8 @@ class ConversationGenerationState(
     }
 
     /**
-     * Atomic idle-only claim for regenerate/edit. The UI disables both actions while this
+     * Atomic idle-only claim for an ordinary continuation/replacement. The UI disables actions
+     * while this
      * conversation is generating, but that visual gate can lag by a frame during a conversation
      * switch; enforcing the same rule here makes the state machine authoritative.
     */
@@ -236,10 +215,12 @@ class ConversationGenerationState(
      * Installs the generation Job before it can execute. This closes the launch-assignment race:
      * Stop either sees and cancels this exact Job, or marks the pre-launch slot STOPPING and this
      * method refuses to start it. A completion hook is a final safety net for cancellation that
-     * lands after installation but before the LAZY body gets its first instruction.
+     * lands after installation but before the LAZY body gets its first instruction. Optional queue
+     * suppression is counted and installed under the same lock before the Job can start.
      */
     fun launchGenerationJob(
         uiToken: Long,
+        suppressAutomaticQueueDrain: Boolean = false,
         block: suspend CoroutineScope.() -> Unit,
     ): Job? {
         val job = scope.launch(start = CoroutineStart.LAZY, block = block)
@@ -255,7 +236,12 @@ class ConversationGenerationState(
             ) {
                 false
             } else {
-                resources.installGenerationJob(job).also(installed::set)
+                resources.installGenerationJob(job).also { didInstall ->
+                    installed.set(didInstall)
+                    if (didInstall && suppressAutomaticQueueDrain) {
+                        resources.deferNextQueueDrain()
+                    }
+                }
             }
         }
         if (!accepted) {
@@ -332,9 +318,9 @@ class ConversationGenerationState(
                 true
             }
             SlotReleaseReason.STOP_BARRIERS_SETTLED -> {
-                // Pending inputs still belong to the STOPPED Run and must migrate to a fresh one.
-                // The callback runs after mailbox handling and therefore outside [genLock].
-                onStopSettled?.invoke(this@ConversationGenerationState)
+                // Every terminal release uses one process-owned queue-drain signal. Keeping Stop
+                // on the shared path lets registry handoff/rebinding preserve the obligation.
+                onQueueDrainRequested?.invoke(this@ConversationGenerationState)
                 false
             }
             SlotReleaseReason.EMPTY_STOP -> error("Coroutine settlement cannot emit EMPTY_STOP")
@@ -358,6 +344,10 @@ class ConversationGenerationState(
      */
     fun deferNextQueueDrain() = synchronized(genLock) {
         resources.deferNextQueueDrain()
+    }
+
+    fun cancelDeferredQueueDrain() = synchronized(genLock) {
+        resources.cancelDeferredQueueDrain()
     }
 
     fun consumeQueueDrainPermission(): Boolean = synchronized(genLock) {
@@ -396,11 +386,8 @@ class ConversationGenerationState(
     @Volatile var onActive: ((String) -> Unit)? = null
     @Volatile var onIdle: ((String) -> Unit)? = null
     @Volatile var onStreamCommit: ((String, ChatMessage) -> Unit)? = null
-    /** Fired when a process-owned generation (rather than the UI controller) releases normally. */
+    /** Fired after any normal or STOPPED terminal release so pending guidance can claim a fresh Run. */
     @Volatile var onQueueDrainRequested: ((ConversationGenerationState) -> Unit)? = null
-    /** Fired after a Stop cleanly settles (durable STOPPED row persisted + slot released).
-     *  The controller wires this to drain queued sends into a fresh Run. */
-    @Volatile var onStopSettled: ((ConversationGenerationState) -> Unit)? = null
 
     /** Builds the token-gated callbacks for one generation, writing ONLY to this conversation's
      *  private state. The ChatViewModel mirror pipes private→global when this conversation is
@@ -505,7 +492,7 @@ class ConversationGenerationState(
             ?: return@withContext StopFinalizationOutcome.RECORDED
         check(release.reason == SlotReleaseReason.STOP_BARRIERS_SETTLED)
         // Fire after mailbox handling and outside [genLock].
-        onStopSettled?.invoke(this@ConversationGenerationState)
+        onQueueDrainRequested?.invoke(this@ConversationGenerationState)
         StopFinalizationOutcome.SETTLED
     }
 
@@ -611,7 +598,6 @@ class ConversationGenerationState(
         is RunState.Recovering -> null
         is RunState.Preparing -> ownerIdentity
         is RunState.Active -> identity
-        is RunState.Compacting -> generationIdentity
         is RunState.Finalizing -> identity
         is RunState.Stopping -> identity
     }
@@ -619,7 +605,6 @@ class ConversationGenerationState(
     private fun RunState.isLaunchableOwner(ownerToken: Long): Boolean = when (this) {
         is RunState.Preparing -> ownerIdentity.ownerToken == ownerToken
         is RunState.Active -> !coroutineSettled && identity.ownerToken == ownerToken
-        is RunState.Compacting -> generationIdentity.ownerToken == ownerToken
         is RunState.Idle,
         is RunState.Recovering,
         is RunState.Finalizing,

@@ -25,12 +25,13 @@ internal fun projectProviderMessages(
         val decodedSegments = entity.toolCallJson?.let { json ->
             runCatching { Json.decodeFromString<List<MessageSegment>>(json) }.getOrNull()
         }
+        val providerSegments = decodedSegments?.filterNot { it.type == "citation" }
         val segments = if (
-            decodedSegments != null && entity.id.startsWith(Constants.TOOL_MSG_PREFIX)
+            providerSegments != null && entity.id.startsWith(Constants.TOOL_MSG_PREFIX)
         ) {
-            toolHistoryCompactor.compact(entity.runId, decodedSegments)
+            toolHistoryCompactor.compact(entity.runId, providerSegments)
         } else {
-            decodedSegments
+            providerSegments
         }
         val toolCall = segments?.lastOrNull { it.type == "tool" }?.let { segment ->
             ToolCallData(
@@ -43,6 +44,8 @@ internal fun projectProviderMessages(
                 displayName = segment.toolDisplayName,
                 resultText = segment.toolResultText,
                 structuredResult = segment.toolStructuredResult,
+                responseOutputItems = segment.responseOutputItems,
+                responseOutputItemProvider = segment.responseOutputItemProvider,
             )
         }
         val attachmentMeta = entity.attachmentMeta?.let { json ->

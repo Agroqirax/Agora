@@ -1,5 +1,6 @@
 package com.newoether.agora.api
 
+import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -7,6 +8,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import java.io.IOException
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 internal class ModelFetchHttpException(
     val statusCode: Int,
@@ -86,3 +88,29 @@ private fun JsonElement.modelFetchErrorDetail(): String? = when (this) {
     }
     else -> null
 }
+
+internal fun openAiEndpointCandidates(
+    baseUrl: String,
+    path: String,
+    retryMissingV1BaseUrl: Boolean,
+): List<String> {
+    val normalizedBaseUrl = baseUrl.trimEnd('/')
+    val cleanPath = path.trimStart('/')
+    val primary = "$normalizedBaseUrl/$cleanPath"
+    if (!retryMissingV1BaseUrl || normalizedBaseUrl.isBlank() ||
+        BaseUrlResolver.hasVersionSegment(normalizedBaseUrl)
+    ) {
+        return listOf(primary)
+    }
+    return listOf(primary, "$normalizedBaseUrl/v1/$cleanPath")
+}
+
+internal fun openAiAuthHeaders(apiKey: String): Map<String, String> =
+    if (apiKey.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer $apiKey")
+
+internal fun nextOpenAiModelPageUrl(endpointUrl: String, cursor: String): String =
+    endpointUrl.toHttpUrl()
+        .newBuilder()
+        .addQueryParameter("after", cursor)
+        .build()
+        .toString()

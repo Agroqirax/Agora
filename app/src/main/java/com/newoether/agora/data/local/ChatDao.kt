@@ -621,8 +621,14 @@ interface ChatDao : ChatAutomationDao, ChatContextCompactDao {
     suspend fun deleteOrphanedEmbeddings()
 
     /** [query] must be pre-escaped for LIKE (see ConversationRepository.escapeLikePattern). */
-    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId IS NULL AND (m.text LIKE '%' || :query || '%' ESCAPE '\\' OR c.title LIKE '%' || :query || '%' ESCAPE '\\') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND substr(m.id, 1, 5) != 'tool_' AND substr(m.id, 1, 7) != 'result_' ORDER BY m.timestamp DESC LIMIT :limit")
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId IS NULL AND (m.text LIKE '%' || :query || '%' ESCAPE '\\' OR c.title LIKE '%' || :query || '%' ESCAPE '\\') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND substr(m.id, 1, 5) != 'tool_' AND substr(m.id, 1, 7) != 'result_' ORDER BY m.timestamp DESC, m.id DESC LIMIT :limit")
     suspend fun searchMessages(query: String, limit: Int = 10): List<MessageEntity>
+
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId IS NULL AND m.toolCallJson LIKE '%\"type\":\"citation\"%' AND m.participant = 'MODEL' AND substr(m.id, 1, 5) != 'tool_' AND substr(m.id, 1, 7) != 'result_' AND m.id > :afterId ORDER BY m.id ASC LIMIT :pageSize")
+    suspend fun getMessagesWithCitationSegmentsPage(
+        afterId: String,
+        pageSize: Int,
+    ): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLastMessageForConversation(conversationId: String): MessageEntity?
@@ -651,8 +657,32 @@ interface ChatDao : ChatAutomationDao, ChatContextCompactDao {
     @Query("DELETE FROM embeddings WHERE messageId = :messageId")
     suspend fun deleteEmbedding(messageId: String)
 
-    @Query("SELECT e.* FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' AND m.id NOT LIKE 'compact_%'")
-    suspend fun getEmbeddingsByModel(modelId: String): List<EmbeddingEntity>
+    @Query(
+        """
+        SELECT e.id, e.messageId, e.embedding, e.dimension
+        FROM embeddings e
+        CROSS JOIN messages m
+        CROSS JOIN conversations c
+        WHERE e.messageId = m.id
+          AND m.conversationId = c.id
+          AND e.modelId = :modelId
+          AND e.id > :afterId
+          AND c.taskId IS NULL
+          AND m.participant IN ('USER', 'MODEL')
+          AND LENGTH(m.text) >= :minimumTextLength
+          AND m.id NOT LIKE 'tool_%'
+          AND m.id NOT LIKE 'result_%'
+          AND m.id NOT LIKE 'compact_%'
+        ORDER BY e.id
+        LIMIT :limit
+        """
+    )
+    suspend fun getEmbeddingSearchPage(
+        modelId: String,
+        afterId: Long,
+        minimumTextLength: Int,
+        limit: Int,
+    ): List<EmbeddingSearchRow>
 
     @Query("DELETE FROM embeddings WHERE modelId = :modelId")
     suspend fun deleteEmbeddingsByModel(modelId: String)

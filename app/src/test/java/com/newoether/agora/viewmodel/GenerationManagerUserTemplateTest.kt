@@ -50,4 +50,25 @@ class GenerationManagerUserTemplateTest {
             projected[1].text,
         )
     }
+
+    @Test
+    fun compactInvocationIsAnApiOnlyFinalUserMessage() {
+        val durableMessages = listOf(
+            ChatMessage(id = "user", text = "question", participant = Participant.USER),
+            ChatMessage(id = "assistant", text = "answer", participant = Participant.MODEL),
+        )
+
+        val projected = projectGenerationInputMessages(
+            messages = durableMessages,
+            includeImages = true,
+            userPrepend = null,
+            userPostpend = null,
+            initialUserPrompt = "Create the compact context summary now.",
+        )
+
+        assertEquals(durableMessages, projected.dropLast(1))
+        assertEquals(Participant.USER, projected.last().participant)
+        assertEquals("Create the compact context summary now.", projected.last().text)
+        assertEquals("assistant", projected.last().parentId)
+    }
 }

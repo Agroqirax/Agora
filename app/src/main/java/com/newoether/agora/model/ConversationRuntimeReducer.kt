@@ -7,7 +7,7 @@ private const val RECOVERY_OWNER_TOKEN = Long.MAX_VALUE
  *
  * It owns startup recovery planning, ordinary Send placement/input acceptance, the process slot,
  * Provider-pass acceptance, normal/Stop coroutine/persistence barriers, the
- * tool-batch/result/commit/continuation gate, and Context Compact admission/result settlement.
+ * tool-batch/result/commit/continuation gate, and shared generation-slot lifecycle.
  * Guidance and external effect bodies remain bounded adapters. The reducer has no Android,
  * coroutine, Room, network, or Compose dependency.
  */
@@ -34,8 +34,6 @@ object ConversationRuntimeReducer {
             is ConversationCommand.ToolBatchRequested -> requestToolBatch(state, command)
             is ConversationCommand.ToolBatchCompleted -> completeToolBatch(state, command)
             is ConversationCommand.ToolRoundCommitted -> commitToolRound(state, command)
-            is ConversationCommand.CompactRequested -> requestCompact(state, command)
-            is ConversationCommand.CompactCompleted -> completeCompact(state, command)
             is ConversationCommand.FinalizationRequested -> requestFinalization(state, command)
             is ConversationCommand.FinalizationCompleted -> completeFinalization(state, command)
             is ConversationCommand.StopRequested -> requestStop(state, command)
@@ -74,7 +72,6 @@ object ConversationRuntimeReducer {
         )
         is RunState.Preparing,
         is RunState.Active,
-        is RunState.Compacting,
         is RunState.Finalizing,
         is RunState.Stopping,
         -> reject(state, CommandRejection.ILLEGAL_STATE)
@@ -112,7 +109,6 @@ object ConversationRuntimeReducer {
         is RunState.Recovering,
         is RunState.Preparing,
         is RunState.Active,
-        is RunState.Compacting,
         is RunState.Finalizing,
         is RunState.Stopping,
         -> reject(state, CommandRejection.ILLEGAL_STATE)
@@ -181,25 +177,6 @@ object ConversationRuntimeReducer {
             )
         }
         is RunState.Stopping -> deferredOrBusy(state, command)
-        is RunState.Compacting -> if (command.directOnly) {
-            busy(state, command)
-        } else {
-            val generationIdentity = state.generationIdentity
-            Transition(
-                newState = state,
-                effects = listOf(
-                    RunEffect.AcceptGuidance(
-                        RunEffectIdentity(
-                            conversationId = generationIdentity.conversationId,
-                            ownerToken = generationIdentity.ownerToken,
-                            runId = requireNotNull(generationIdentity.runId),
-                            pass = generationIdentity.pass,
-                            effectId = command.identity.effectId,
-                        ),
-                    ),
-                ),
-            )
-        }
         is RunState.Finalizing -> deferredOrBusy(state, command)
         is RunState.Recovering -> reject(state, CommandRejection.ILLEGAL_STATE)
     }
@@ -487,63 +464,6 @@ object ConversationRuntimeReducer {
         )
     }
 
-    private fun requestCompact(
-        state: RunState,
-        command: ConversationCommand.CompactRequested,
-    ): Transition = when (state) {
-        is RunState.Idle -> {
-            val compacting = RunState.Compacting(
-                effectIdentity = command.identity,
-                compactRunId = command.compactRunId,
-            )
-            Transition(
-                newState = compacting,
-                effects = listOf(
-                    RunEffect.RunCompact(command.identity, command.compactRunId),
-                ),
-            )
-        }
-        is RunState.Compacting -> reject(
-            state,
-            if (
-                state.effectIdentity == command.identity &&
-                state.compactRunId == command.compactRunId
-            ) {
-                CommandRejection.DUPLICATE_RESULT
-            } else {
-                CommandRejection.STALE_IDENTITY
-            },
-        )
-        is RunState.Recovering,
-        is RunState.Preparing,
-        is RunState.Active,
-        is RunState.Finalizing,
-        is RunState.Stopping,
-        -> reject(state, CommandRejection.ILLEGAL_STATE)
-    }
-
-    private fun completeCompact(
-        state: RunState,
-        command: ConversationCommand.CompactCompleted,
-    ): Transition {
-        val compacting = state as? RunState.Compacting
-            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
-        if (compacting.effectIdentity != command.identity) {
-            return reject(state, CommandRejection.STALE_IDENTITY)
-        }
-        val effects = buildList {
-            if (command.outcome == CompactOutcome.FAILED) {
-                add(RunEffect.CompactFailed(command.identity))
-            }
-            add(
-                RunEffect.ReleaseSlot(
-                    compacting.generationIdentity,
-                    SlotReleaseReason.NORMAL_COMPLETION,
-                ),
-            )
-        }
-        return Transition(RunState.Idle(compacting.conversationId), effects)
-    }
 
     private fun requestFinalization(
         state: RunState,
@@ -610,21 +530,29 @@ object ConversationRuntimeReducer {
             is RunState.Recovering -> return reject(state, CommandRejection.ILLEGAL_STATE)
             is RunState.Preparing -> state.ownerIdentity
             is RunState.Active -> state.identity
-            is RunState.Compacting -> state.generationIdentity
             is RunState.Finalizing -> {
                 if (!state.persistenceFailureReported) {
                     return reject(state, CommandRejection.ILLEGAL_STATE)
                 }
                 state.identity
             }
-            is RunState.Stopping -> return reject(
-                state = state,
-                rejection = if (state.identity == command.identity) {
-                    CommandRejection.DUPLICATE_RESULT
-                } else {
-                    CommandRejection.STALE_IDENTITY
-                },
-            )
+            is RunState.Stopping -> return when {
+                state.identity != command.identity ||
+                    state.finalizationEffectId != command.effectId ->
+                    reject(state, CommandRejection.STALE_IDENTITY)
+                !state.persistenceFailureReported ->
+                    reject(state, CommandRejection.DUPLICATE_RESULT)
+                state.finalizationEffectId == null ->
+                    reject(state, CommandRejection.ILLEGAL_STATE)
+                else -> Transition(
+                    newState = state.copy(persistenceFailureReported = false),
+                    effects = listOf(
+                        RunEffect.FinalizeStop(
+                            state.identity.effectIdentity(state.finalizationEffectId),
+                        ),
+                    ),
+                )
+            }
             is RunState.Idle -> return reject(state, CommandRejection.ILLEGAL_STATE)
         }
         if (activeIdentity != command.identity) {
@@ -691,7 +619,6 @@ object ConversationRuntimeReducer {
                 )
             }
         }
-        is RunState.Compacting -> reject(state, CommandRejection.ILLEGAL_STATE)
         is RunState.Finalizing -> when {
             state.identity != command.identity ->
                 reject(state, CommandRejection.STALE_IDENTITY)

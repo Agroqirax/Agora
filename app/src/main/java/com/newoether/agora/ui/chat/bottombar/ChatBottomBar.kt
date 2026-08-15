@@ -67,6 +67,7 @@ import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.viewmodel.SendAcceptance
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,8 +81,15 @@ import com.newoether.agora.data.modelDisplayName
 internal val CHAT_BOTTOM_BAR_OUTER_RADIUS = 28.dp
 internal val CHAT_BOTTOM_BAR_OUTER_SHAPE = RoundedCornerShape(CHAT_BOTTOM_BAR_OUTER_RADIUS)
 
-internal fun contextUsageAtCapacity(estimatedTokens: Int, tokenBudget: Int): Boolean =
-    tokenBudget > 0 && estimatedTokens >= tokenBudget
+internal fun contextUsageExceedsCompactThreshold(
+    estimatedTokens: Int, tokenBudget: Int, thresholdPercent: Int,
+): Boolean {
+    val normalizedBudget = tokenBudget.coerceAtLeast(1)
+    val normalizedPercent = thresholdPercent.coerceIn(50, 100)
+    val threshold = ((normalizedBudget.toLong() * normalizedPercent + 99L) / 100L)
+        .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    return tokenBudget > 0 && estimatedTokens > threshold
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -101,6 +109,8 @@ fun ChatBottomBar(
     customProviders: List<CustomProviderConfig> = emptyList(),
     codeExecutionEnabled: Boolean = false,
     googleSearchEnabled: Boolean = false,
+    openAiWebSearchAvailable: Boolean = false,
+    openAiWebSearchEnabled: Boolean = false,
     thinkingEnabled: Boolean = true,
     thinkingLevel: String = "medium",
     thinkingBudgetEnabled: Boolean = false,
@@ -112,6 +122,7 @@ fun ChatBottomBar(
     shellEnabled: Boolean = false,
     onCodeExecutionToggle: (Boolean) -> Unit = {},
     onGoogleSearchToggle: (Boolean) -> Unit = {},
+    onOpenAiWebSearchToggle: (Boolean) -> Unit = {},
     onThinkingToggle: (Boolean) -> Unit = {},
     onThinkingLevelChange: (String) -> Unit = {},
     onThinkingBudgetEnabledChange: (Boolean) -> Unit = {},
@@ -148,6 +159,7 @@ fun ChatBottomBar(
     compactDefaultRetainCount: Int = 6,
     contextEstimatedTokens: Int = 0,
     contextTokenBudget: Int = ContextBudget.DEFAULT_TOKENS,
+    contextCompactThresholdPercent: Int = 90,
     canCompact: Boolean = false,
     onCompactClick: () -> Unit = {},
     queuedSends: List<QueuedSend> = emptyList(),
@@ -186,7 +198,6 @@ fun ChatBottomBar(
     LaunchedEffect(openAiServiceTierAvailable) {
         if (!openAiServiceTierAvailable) showOpenAiServiceTierSheet = false
     }
-
     val photoLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris -> composer.onPickImages(uris) }
@@ -330,117 +341,44 @@ fun ChatBottomBar(
 
         Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp, start = 8.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(48.dp).background(MaterialTheme.colorScheme.surfaceColorAtElevation(10.dp), RoundedCornerShape(100)).padding(horizontal = 8.dp, vertical = 4.dp)) {
-                var showAddMenu by remember { mutableStateOf(false) }
-                var lastAddDismissTime by remember { mutableLongStateOf(0L) }
-                ExposedDropdownMenuBox(
-                    expanded = showAddMenu,
-                    onExpandedChange = { }
-                ) {
-                    IconButton(
-                        onClick = {
-                            val now = System.currentTimeMillis()
-                            if (showAddMenu) {
-                                showAddMenu = false
-                            } else if (now - lastAddDismissTime > 200) {
-                                showAddMenu = true
+                AttachmentAddMenu(
+                    onCamera = {
+                        activityLaunchScope.launch {
+                            val target = composer.createCameraCaptureTarget()
+                            if (target == null) {
+                                composer.reportCameraPreparationFailure()
+                                return@launch
                             }
-                        },
-                        modifier = Modifier.size(32.dp).menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
-                    ) {
-                        Icon(Icons.Default.Add, stringResource(R.string.add_attachment), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-
-                    ExposedDropdownMenu(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        expanded = showAddMenu,
-                        onDismissRequest = {
-                            if (showAddMenu) {
-                                showAddMenu = false
-                                lastAddDismissTime = System.currentTimeMillis()
-                            }
-                        },
-                        matchTextFieldWidth = false,
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        Icons.Default.PhotoCamera,
-                                        null,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(stringResource(R.string.camera))
-                                }
-                            },
-                            onClick = {
-                                showAddMenu = false
-                                lastAddDismissTime = 0L
-                                activityLaunchScope.launch {
-                                    val target = composer.createCameraCaptureTarget()
-                                    if (target == null) {
-                                        composer.reportCameraPreparationFailure()
-                                        return@launch
-                                    }
-                                    if (canLaunchSystemImageCapture(context)) {
-                                        pendingCameraPath = target.privatePath
-                                        runCatching {
-                                            cameraLauncher.launch(target.uri)
-                                        }.onFailure {
-                                            pendingCameraPath = null
-                                            launchInternalCamera(target.privatePath)
-                                        }
-                                    } else {
+                            if (canLaunchSystemImageCapture(context)) {
+                                pendingCameraPath = target.privatePath
+                                runCatching { cameraLauncher.launch(target.uri) }
+                                    .onFailure {
+                                        pendingCameraPath = null
                                         launchInternalCamera(target.privatePath)
                                     }
-                                }
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Image, null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(stringResource(R.string.photos))
-                                }
-                            },
-                            onClick = {
-                                showAddMenu = false
-                                lastAddDismissTime = 0L
-                                photoLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            } else {
+                                launchInternalCamera(target.privatePath)
                             }
+                        }
+                    },
+                    onPhotos = {
+                        photoLauncher.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                androidx.activity.result.contract.ActivityResultContracts
+                                    .PickVisualMedia.ImageOnly,
+                            ),
                         )
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Videocam, null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(stringResource(R.string.videos))
-                                }
-                            },
-                            onClick = {
-                                showAddMenu = false
-                                lastAddDismissTime = 0L
-                                videoLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly))
-                            }
+                    },
+                    onVideos = {
+                        videoLauncher.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                androidx.activity.result.contract.ActivityResultContracts
+                                    .PickVisualMedia.VideoOnly,
+                            ),
                         )
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.AttachFile, null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(stringResource(R.string.files))
-                                }
-                            },
-                            onClick = {
-                                showAddMenu = false
-                                lastAddDismissTime = 0L
-                                fileLauncher.launch("*/*")
-                            }
-                        )
-                    }
-                }
+                    },
+                    onFiles = { fileLauncher.launch("*/*") },
+                )
                 var activeMenu by remember { mutableStateOf<String?>(null) }
                 var lastModelDismissTime by remember { mutableLongStateOf(0L) }
                 var lastContextDismissTime by remember { mutableLongStateOf(0L) }
@@ -537,7 +475,11 @@ fun ChatBottomBar(
                 }
                 
                 val contextProgressColor = if (
-                    contextUsageAtCapacity(contextEstimatedTokens, contextTokenBudget)
+                    contextUsageExceedsCompactThreshold(
+                        contextEstimatedTokens,
+                        contextTokenBudget,
+                        contextCompactThresholdPercent,
+                    )
                 ) {
                     MaterialTheme.colorScheme.error
                 } else {
@@ -646,51 +588,10 @@ fun ChatBottomBar(
                         matchTextFieldWidth = false,
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        val isGemini = selectedProvider.equals("google", ignoreCase = true) && isModelValid
-                        if (isGemini) {
-                            DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(stringResource(R.string.code_execution))
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        ProviderBadge("Gemini")
-                                    }
-                                },
-                                trailingIcon = {
-                                    Switch(
-                                        checked = codeExecutionEnabled,
-                                        onCheckedChange = { onCodeExecutionToggle(it) },
-                                        modifier = Modifier.scale(0.7f)
-                                    )
-                                },
-                                onClick = { onCodeExecutionToggle(!codeExecutionEnabled) }
-                            )
-                            DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(stringResource(R.string.google_search))
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        ProviderBadge("Gemini")
-                                    }
-                                },
-                                trailingIcon = {
-                                    Switch(
-                                        checked = googleSearchEnabled,
-                                        onCheckedChange = { onGoogleSearchToggle(it) },
-                                        modifier = Modifier.scale(0.7f)
-                                    )
-                                },
-                                onClick = { onGoogleSearchToggle(!googleSearchEnabled) }
-                            )
-                        }
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(18.dp))
+                                    Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column {
                                         Text(stringResource(R.string.thinking))
@@ -719,6 +620,52 @@ fun ChatBottomBar(
                                 showThinkingSheet = true
                             }
                         )
+                        val isGemini = selectedProvider.equals("google", ignoreCase = true) && isModelValid
+                        if (isGemini) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(stringResource(R.string.code_execution))
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        ProviderBadge("Gemini")
+                                    }
+                                },
+                                trailingIcon = {
+                                    Switch(
+                                        checked = codeExecutionEnabled,
+                                        onCheckedChange = { onCodeExecutionToggle(it) },
+                                        modifier = Modifier.scale(0.7f)
+                                    )
+                                },
+                                onClick = { onCodeExecutionToggle(!codeExecutionEnabled) }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Image(
+                                            painter = androidx.compose.ui.res.painterResource(R.drawable.provider_google),
+                                            contentDescription = null,
+                                            colorFilter = ColorFilter.tint(Color.White),
+                                            modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(stringResource(R.string.google_search))
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        ProviderBadge("Gemini")
+                                    }
+                                },
+                                trailingIcon = {
+                                    Switch(
+                                        checked = googleSearchEnabled,
+                                        onCheckedChange = { onGoogleSearchToggle(it) },
+                                        modifier = Modifier.scale(0.7f)
+                                    )
+                                },
+                                onClick = { onGoogleSearchToggle(!googleSearchEnabled) }
+                            )
+                        }
                         if (openAiServiceTierAvailable && isModelValid) {
                             DropdownMenuItem(
                                 text = {
@@ -726,7 +673,7 @@ fun ChatBottomBar(
                                         Icon(
                                             Icons.Default.Speed,
                                             contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
+                                            modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp),
                                         )
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column {
@@ -755,11 +702,18 @@ fun ChatBottomBar(
                                 },
                             )
                         }
+                        if (openAiWebSearchAvailable && isModelValid) {
+                            NativeSearchMenuItem(
+                                checked = openAiWebSearchEnabled,
+                                provider = "OpenAI",
+                                onCheckedChange = onOpenAiWebSearchToggle,
+                            )
+                        }
                         if (showWebSearch) {
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Language, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(stringResource(R.string.web_search))
                                     }
@@ -778,7 +732,7 @@ fun ChatBottomBar(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(stringResource(R.string.shell_title))
                                     }
@@ -796,7 +750,7 @@ fun ChatBottomBar(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Compress, null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Compress, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(stringResource(R.string.context_compact))
                                 }
@@ -807,7 +761,7 @@ fun ChatBottomBar(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Tune, null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Tune, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(stringResource(R.string.advanced_settings))
                                 }
@@ -842,139 +796,33 @@ fun ChatBottomBar(
         }
     }
 
-    if (showThinkingSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showThinkingSheet = false },
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ) {
-            DialogWindowEdgeToEdge()
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 16.dp)
-            ) {
-                ThinkingControlPanel(
-                    enabled = thinkingEnabled,
-                    level = thinkingLevel,
-                    budgetEnabled = thinkingBudgetEnabled,
-                    budgetTokens = thinkingBudgetTokens,
-                    onEnabledChange = onThinkingToggle,
-                    onLevelChange = onThinkingLevelChange,
-                    onBudgetEnabledChange = onThinkingBudgetEnabledChange,
-                    onBudgetTokensChange = onThinkingBudgetTokensChange,
-                    providerName = providerDisplayName(
-                        com.newoether.agora.model.ModelId.parse(selectedModel).providerName,
-                        customProviders,
-                    ),
-                    animateSections = true
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-        }
-    }
+    ChatBottomBarOverlayHost(
+        showThinkingSheet = showThinkingSheet,
+        onDismissThinkingSheet = { showThinkingSheet = false },
+        thinkingEnabled = thinkingEnabled,
+        thinkingLevel = thinkingLevel,
+        thinkingBudgetEnabled = thinkingBudgetEnabled,
+        thinkingBudgetTokens = thinkingBudgetTokens,
+        onThinkingToggle = onThinkingToggle,
+        onThinkingLevelChange = onThinkingLevelChange,
+        onThinkingBudgetEnabledChange = onThinkingBudgetEnabledChange,
+        onThinkingBudgetTokensChange = onThinkingBudgetTokensChange,
+        selectedModel = selectedModel,
+        customProviders = customProviders,
+        showOpenAiServiceTierSheet = showOpenAiServiceTierSheet,
+        openAiServiceTierAvailable = openAiServiceTierAvailable,
+        onDismissOpenAiServiceTierSheet = { showOpenAiServiceTierSheet = false },
+        openAiServiceTierEnabled = openAiServiceTierEnabled,
+        openAiServiceTier = openAiServiceTier,
+        onOpenAiServiceTierToggle = onOpenAiServiceTierToggle,
+        onOpenAiServiceTierChange = onOpenAiServiceTierChange,
+        internalCameraPath = internalCameraPath,
+        onInternalCameraPathChange = { internalCameraPath = it },
+        composer = composer,
+        pdfViewerSelection = pdfViewerSelection,
+        onTogglePdfSelection = onTogglePdfSelection,
+        onPdfPreviewSelect = onPdfPreviewSelect,
+        onInitPdfSelection = onInitPdfSelection,
+    )
 
-    if (showOpenAiServiceTierSheet && openAiServiceTierAvailable) {
-        ModalBottomSheet(
-            onDismissRequest = { showOpenAiServiceTierSheet = false },
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ) {
-            DialogWindowEdgeToEdge()
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
-            ) {
-                OpenAiServiceTierControlPanel(
-                    enabled = openAiServiceTierEnabled,
-                    tier = openAiServiceTier,
-                    onEnabledChange = onOpenAiServiceTierToggle,
-                    onTierChange = onOpenAiServiceTierChange,
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-        }
-    }
-
-    internalCameraPath?.let { privatePath ->
-        InternalCameraCaptureDialog(
-            targetPath = privatePath,
-            onCaptured = {
-                internalCameraPath = null
-                composer.completeCameraCapture(privatePath, captured = true)
-            },
-            onCancelled = {
-                internalCameraPath = null
-                composer.completeCameraCapture(privatePath, captured = false)
-            },
-            onFailure = {
-                internalCameraPath = null
-                composer.completeCameraCapture(privatePath, captured = false)
-                composer.reportCameraPreparationFailure()
-            },
-        )
-    }
-
-    // Attachment rejection / camera failure dialog
-    if (composer.rejectedMessage != null) {
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { composer.rejectedMessage = null },
-            title = { Text(stringResource(composer.rejectedTitleRes), fontWeight = FontWeight.Bold) },
-            text = { Text(composer.rejectedMessage!!) },
-            confirmButton = {
-                TextButton(onClick = { composer.rejectedMessage = null }) {
-                    Text(stringResource(R.string.provider_close))
-                }
-            }
-        )
-    }
-
-    // PDF page selection dialog
-    if (composer.showPdfPageDialog && composer.pendingPdfUri != null) {
-        PdfPageSelectDialog(
-            totalPages = composer.pendingPdfPages,
-            thumbnailPaths = composer.pendingPdfRenderedPaths,
-            isLoading = composer.pendingPdfIsRendering,
-            renderProgress = composer.pendingPdfRenderProgress,
-            selectedPages = pdfViewerSelection,
-            onTogglePage = { onTogglePdfSelection?.invoke(it) },
-            onSelectAll = { select -> onTogglePdfSelection?.let { toggle ->
-                (0 until composer.pendingPdfPages.coerceAtLeast(1)).forEach { i ->
-                    if ((i in pdfViewerSelection) != select) toggle(i)
-                }
-            }},
-            onPreviewPage = { index ->
-                composer.showPdfPageDialog = false
-                composer.pdfDialogHiddenForPreview = true
-                onPdfPreviewSelect?.invoke(composer.pendingPdfRenderedPaths, index)
-            },
-            onConfirm = { selection ->
-                composer.confirmPendingPdfSelection(selection.selectedPages)
-            },
-            onDismiss = {
-                composer.dismissPendingPdf()
-            }
-        )
-    }
-
-    // Video slice dialog
-    if (composer.showVideoSliceDialog && composer.pendingVideoUri != null) {
-        VideoSliceDialog(
-            videoUri = composer.pendingVideoUri!!,
-            durationMs = composer.pendingVideoDurationMs,
-            onConfirm = { result ->
-                composer.showVideoSliceDialog = false
-                composer.addSlicedVideo(result.uri, result.frameCount, result.intervalMs)
-                // Process next video in queue
-                composer.processNextVideo()
-            },
-            onDismiss = {
-                composer.showVideoSliceDialog = false
-                // Process next video in queue
-                composer.processNextVideo()
-            }
-        )
-    }
 }

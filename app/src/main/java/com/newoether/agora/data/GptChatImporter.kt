@@ -1,5 +1,7 @@
 package com.newoether.agora.data
 
+import com.newoether.agora.model.CitationRecord
+
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -68,6 +70,8 @@ class GptChatImporter {
         @SerialName("model_slug") val modelSlug: String? = null,
         @SerialName("parent_id") val parentId: String? = null,
         @SerialName("is_complete") val isComplete: Boolean? = null,
+        @SerialName("content_references") val contentReferences: List<JsonElement> = emptyList(),
+        val citations: List<JsonElement> = emptyList(),
         @SerialName("finish_details") val finishDetails: GptFinishDetails? = null,
         @SerialName("finished_duration_sec") val finishedDurationSec: Int? = null
     )
@@ -200,6 +204,7 @@ class GptChatImporter {
                 val id: String,
                 val rawParentId: String?,
                 val text: String,
+                val citations: List<CitationRecord>,
                 val thoughts: String?,
                 val thoughtTitle: String?,
                 val contentType: String,
@@ -229,6 +234,10 @@ class GptChatImporter {
                     "user_editable_context" -> msg.content?.parts?.joinToString("") { extractTextFromPart(it) } ?: ""
                     else -> msg.content?.parts?.joinToString("") { extractTextFromPart(it) } ?: ""
                 }
+                val importedText = projectChatGptCitations(
+                    rawText = text,
+                    references = msg.metadata?.let { it.contentReferences + it.citations }.orEmpty(),
+                )
                 val thoughts = when (contentType) {
                     "thoughts" -> msg.content?.thoughts?.joinToString("\n\n") { it.content }
                     else -> null
@@ -250,7 +259,21 @@ class GptChatImporter {
                     msg.metadata?.finishDetails?.type != null -> "STOPPED"
                     else -> "SUCCESS"
                 }
-                RawMsg(msg.id, rawParentMap[msg.id], cleanCitationMarkers(text), thoughts, thoughtTitle, contentType, participant, status, timestamp, thoughtTimeMs, modelName, role)
+                RawMsg(
+                    msg.id,
+                    rawParentMap[msg.id],
+                    importedText.text,
+                    importedText.citations,
+                    thoughts,
+                    thoughtTitle,
+                    contentType,
+                    participant,
+                    status,
+                    timestamp,
+                    thoughtTimeMs,
+                    modelName,
+                    role,
+                )
             }
 
             val rawById = rawMessages.associateBy { it.id }
@@ -263,6 +286,7 @@ class GptChatImporter {
             val mergedThoughtTitle = mutableMapOf<String, String?>()
             val mergedThoughtTimeMs = mutableMapOf<String, Long>()
             val mergedTextSuffix = mutableMapOf<String, StringBuilder>()
+            val mergedCitations = mutableMapOf<String, MutableList<CitationRecord>>()
 
             // Find indices of "keep" messages (not merge types, not tool role)
             val keepIndices = rawMessages.indices.filter { rawMessages[it].contentType !in mergeTypes && rawMessages[it].authorRole != "tool" }
@@ -274,6 +298,10 @@ class GptChatImporter {
                 removedIds.add(rm.id)
                 val targetIdx = nextKeepIdx(i)
                 val target = if (targetIdx != null) rawMessages[targetIdx] else null
+                if (target != null && rm.citations.isNotEmpty()) {
+                    mergedCitations.getOrPut(target.id) { mutableListOf() }
+                        .addAll(rm.citations.map { it.copy(anchors = emptyList()) })
+                }
                 when (rm.contentType) {
                     "thoughts" -> {
                         if (target != null && !rm.thoughts.isNullOrBlank()) {
@@ -361,6 +389,10 @@ class GptChatImporter {
                 val finalThoughts = mergedThoughts[rm.id] ?: rm.thoughts
                 val finalThoughtTitle = mergedThoughtTitle[rm.id] ?: rm.thoughtTitle
                 val finalThoughtTimeMs = mergedThoughtTimeMs[rm.id]
+                val citationJson = encodeImportedCitations(
+                    rm.citations + mergedCitations[rm.id].orEmpty(),
+                    finalText,
+                )
                 messageEntities.add(
                     ClaudeChatImporter.ImportMessageEntity(
                         id = rm.id,
@@ -376,7 +408,7 @@ class GptChatImporter {
                         timestamp = rm.timestamp,
                         thoughtTimeMs = finalThoughtTimeMs,
                         modelName = rm.modelName,
-                        toolCallJson = null,
+                        toolCallJson = citationJson,
                         attachmentMeta = null
                     )
                 )
@@ -437,17 +469,6 @@ class GptChatImporter {
         } catch (_: Exception) {
             ""
         }
-    }
-
-    /** Strip GPT citation markers from text.
-     *  GPT uses PUA chars (U+E200-U+E202) for delimited citations like
-     *  "citeturn0search7turn0search12" and
-     *  CJK-bracket markers like "【turn0search20】". */
-    private fun cleanCitationMarkers(text: String): String {
-        var cleaned = text.replace(Regex("(cite|filecite)[^]+"), "")
-        cleaned = cleaned.replace("", "").replace("", "").replace("", "")
-        cleaned = cleaned.replace(Regex("【turn\\d+[a-z]+\\d+】"), "")
-        return cleaned
     }
 
     private fun convertTimestamp(unixSeconds: Double): Long {

@@ -1,12 +1,65 @@
 package com.newoether.agora.viewmodel
 
+import com.newoether.agora.api.openai.toResponsesInput
+import com.newoether.agora.api.util.convertToOpenAiMessages
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ToolCallData
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GenerationToolRoundBuilderTest {
+    @Test
+    fun `durable Room projection replays opaque Responses state before tool output`() {
+        val ids = ArrayDeque(listOf("tool", "result"))
+        val builder = GenerationToolRoundBuilder(
+            newId = { ids.removeFirst() },
+            nowMs = { 100L },
+        )
+        val reasoning = Json.parseToJsonElement(
+            """{"id":"rs_1","type":"reasoning","encrypted_content":"opaque"}""",
+        ).jsonObject
+        val functionCall = Json.parseToJsonElement(
+            """{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"}""",
+        ).jsonObject
+        val round = builder.build(
+            previousMessageId = "assistant",
+            conversationId = "conversation",
+            runId = "run",
+            modelName = "model",
+            providerName = "OpenAI",
+            calls = listOf(
+                ToolCallData(
+                    toolName = "lookup",
+                    arguments = "{}",
+                    result = "done",
+                    toolCallId = "call_1",
+                    responseOutputItems = listOf(reasoning, functionCall),
+                    responseOutputItemProvider = "OpenAI",
+                ),
+            ),
+            completedSegments = emptyList(),
+        )
+
+        val durablePath = ApiPathAssembler.assemble(round.entities, round.entities)
+        val input = convertToOpenAiMessages(
+            projectProviderMessages(durablePath, includeStoredTranscriptions = false),
+        ).toResponsesInput(providerName = "OpenAI")
+
+        assertEquals(
+            listOf("reasoning", "function_call", "function_call_output"),
+            input.map { it["type"]?.jsonPrimitive?.content },
+        )
+        assertEquals("opaque", input[0]["encrypted_content"]?.jsonPrimitive?.content)
+        assertEquals("done", input[2]["output"]?.jsonPrimitive?.content)
+        assertTrue(
+            round.entities[1].toolCallJson.orEmpty().contains("responseOutputItems").not(),
+        )
+    }
+
     @Test
     fun `builds matching provider path and Room graph with deterministic hierarchy`() {
         val ids = ArrayDeque(listOf("tool", "result-1", "result-2"))

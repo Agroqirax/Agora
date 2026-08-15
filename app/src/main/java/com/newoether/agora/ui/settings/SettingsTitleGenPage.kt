@@ -19,9 +19,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.data.modelAliasDisplayName
 import com.newoether.agora.data.modelDisplayName
 import com.newoether.agora.data.providerDisplayName
-import com.newoether.agora.model.apiModelName
 import com.newoether.agora.viewmodel.ChatViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -144,9 +144,12 @@ fun SettingsTitleGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         )
                     }
                     items(enabledModelsList, key = { it }) { model ->
-                        val alias = modelAliases[model]
                         val titleParsed = com.newoether.agora.model.ModelId.parse(model)
-                        val displayName = alias ?: titleParsed.apiModelName
+                        val displayName = modelAliasDisplayName(
+                            model,
+                            modelAliases,
+                            customProviders,
+                        )
                         SettingsItem(
                             headlineContent = { Text(displayName, fontWeight = if (titleGenModel == model) FontWeight.Bold else FontWeight.Normal) },
                             supportingContent = { Text(providerDisplayName(titleParsed.providerName, customProviders), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)) },

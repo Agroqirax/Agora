@@ -1,6 +1,11 @@
 package com.newoether.agora.tool
 
 import com.newoether.agora.model.ToolCallData
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -72,6 +77,88 @@ class ShellDurableJobExecutorTest {
             cursor.consume("""{"output":"ab","output_bytes":2}"""),
         )
     }
+    @Test
+    fun durableOutputSnapshotPreservesBoundedFullUnicodeOutputAndMetadata() {
+        val raw = """{"state":"running","output":"中文 😀","output_bytes":42,"truncated":true}"""
+        assertEquals(
+            ConchJobOutputSnapshot(
+                text = "中文 😀",
+                outputBytes = 42,
+                truncated = true,
+            ),
+            conchJobOutputSnapshot(raw),
+        )
+        assertEquals(null, conchJobOutputSnapshot("not-json"))
+    }
+
+    @Test
+    fun waitPublishesDistinctFullSnapshotsThenTimesOutWithoutStoppingTheJob() = runTest {
+        var now = 0L
+        val polls = ArrayDeque(
+            listOf(
+                jobSnapshot("one\n"),
+                jobSnapshot("one\ntwo\n"),
+                jobSnapshot("one\ntwo\n"),
+            ),
+        )
+        val published = mutableListOf<String>()
+        val result = executor.waitForShellJobPolling(
+            jobId = "same-job",
+            serverName = "server",
+            timeoutMs = 1_000,
+            poller = ShellJobPoller { polls.removeFirstOrNull() ?: jobSnapshot("one\ntwo\n") },
+            onOutputSnapshot = published::add,
+            nowMs = { now },
+            delayMs = { delay -> now += delay },
+        )
+        val json = Json.parseToJsonElement(result).jsonObject
+
+        assertEquals(listOf("one\n", "one\ntwo\n"), published)
+        assertEquals("same-job", json.getValue("job_id").jsonPrimitive.content)
+        assertTrue(json.getValue("timed_out").jsonPrimitive.content.toBoolean())
+        assertEquals("one\ntwo\n", json.getValue("output").jsonPrimitive.content)
+    }
+
+    @Test
+    fun waitPollingPropagatesCancellationImmediately() = runTest {
+        var attempts = 0
+        try {
+            executor.waitForShellJobPolling(
+                jobId = "live-job",
+                serverName = "server",
+                timeoutMs = 60_000,
+                poller = ShellJobPoller {
+                    attempts++
+                    throw CancellationException("stop")
+                },
+                delayMs = {},
+            )
+            throw AssertionError("Expected CancellationException")
+        } catch (_: CancellationException) {
+            assertEquals(1, attempts)
+        }
+    }
+
+    @Test
+    fun sustainedPollFailureRetainsTheLatestSnapshotAndDoesNotClaimTheJobStopped() = runTest {
+        var polls = 0
+        val result = executor.waitForShellJobPolling(
+            jobId = "live-job",
+            serverName = "server",
+            timeoutMs = 60_000,
+            poller = ShellJobPoller {
+                if (polls++ == 0) jobSnapshot("latest 😀\n") else error("offline")
+            },
+            delayMs = {},
+        )
+        val json = Json.parseToJsonElement(result).jsonObject
+
+        assertEquals("poll_failed", json.getValue("error").jsonPrimitive.content)
+        assertEquals("unknown", json.getValue("state").jsonPrimitive.content)
+        assertEquals("latest 😀\n", json.getValue("output").jsonPrimitive.content)
+        assertTrue(json.getValue("note").jsonPrimitive.content.contains("not stopped"))
+    }
+
     @Test
     fun committedTerminalShellResultsResolveAcknowledgementsAcrossEnvelopes() {
         val calls = listOf(

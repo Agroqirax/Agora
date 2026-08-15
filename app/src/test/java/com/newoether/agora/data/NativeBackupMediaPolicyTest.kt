@@ -2,8 +2,12 @@ package com.newoether.agora.data
 
 import com.newoether.agora.model.AttachmentItem
 import com.newoether.agora.model.AttachmentMeta
+import com.newoether.agora.model.CitationAnchor
+import com.newoether.agora.model.CitationPolicy
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.ToolImageAttachment
+import com.newoether.agora.model.citationRecords
+import com.newoether.agora.model.toMessageSegment
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -100,6 +104,42 @@ class NativeBackupMediaPolicyTest {
         val items = json.decodeFromString<AttachmentMeta>(restored).items
         assertEquals("content://restored/legacy-a", items[0].originalUri)
         assertEquals("content://restored/legacy-b", items[1].originalUri)
+    }
+
+    @Test
+    fun citationSegmentsSurviveNativeMediaRewriteAndRestore() {
+        val answer = "Claim"
+        val citation = requireNotNull(
+            CitationPolicy.create(
+                provider = "test",
+                kind = "web",
+                title = "Source",
+                url = "https://example.com/source",
+                anchors = listOf(CitationAnchor(0, answer.length, answer)),
+                answerText = answer,
+            ),
+        )
+        val raw = json.encodeToString(listOf(citation.toMessageSegment()))
+
+        val exported = requireNotNull(
+            NativeBackupMediaPolicy.rewriteToolImagePathsForExport(raw) {
+                error("citation segments have no tool image path")
+            },
+        )
+        val restored = requireNotNull(
+            NativeBackupMediaPolicy.restoreToolImagePaths(
+                raw = exported,
+                archiveVersion = 4,
+                restoredPathForArchiveEntry = {
+                    error("citation segments have no archive media path")
+                },
+            ),
+        )
+
+        assertEquals(
+            listOf(citation),
+            json.decodeFromString<List<MessageSegment>>(restored).citationRecords(answer),
+        )
     }
 
     @Test

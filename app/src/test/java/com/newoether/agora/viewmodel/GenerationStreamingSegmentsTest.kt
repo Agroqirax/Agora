@@ -1,11 +1,16 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationAnchor
+import com.newoether.agora.model.CitationPolicy
 import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.citationRecords
+import com.newoether.agora.model.toMessageSegment
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GenerationStreamingSegmentsTest {
@@ -53,6 +58,14 @@ class GenerationStreamingSegmentsTest {
     }
 
     @Test
+    fun `provider pass finish stops live thinking before publishing final duration`() {
+        assertEquals(MessageStatus.SENDING, statusAfterThoughtPhaseFinished(MessageStatus.THINKING))
+        assertEquals(MessageStatus.SENDING, statusAfterThoughtPhaseFinished(MessageStatus.SENDING))
+        assertEquals(MessageStatus.ERROR, statusAfterThoughtPhaseFinished(MessageStatus.ERROR))
+        assertEquals(MessageStatus.STOPPED, statusAfterThoughtPhaseFinished(MessageStatus.STOPPED))
+    }
+
+    @Test
     fun `final snapshot preserves the terminal message projection`() {
         val oversized = "x".repeat(2_000_000)
         val snapshot = GenerationFinalSnapshot(
@@ -85,6 +98,166 @@ class GenerationStreamingSegmentsTest {
         assertEquals("firstsecond", message.segments?.single()?.content)
         assertEquals("run", message.runId)
         assertEquals(3L, message.runSequence)
+    }
+
+    @Test
+    fun `provider pass citation anchors rebase into the merged answer`() {
+        val prefix = "First answer before tool. "
+        val cited = "([openai.com](https://openai.com/research))"
+        val passAnswer = "Second answer $cited"
+        val localStart = passAnswer.indexOf(cited)
+        val local = requireNotNull(
+            CitationPolicy.create(
+                provider = "openai",
+                kind = "url",
+                title = "OpenAI Research",
+                url = "https://openai.com/research",
+                anchors = listOf(
+                    CitationAnchor(localStart, localStart + cited.length, cited),
+                ),
+                answerText = passAnswer,
+            ),
+        )
+
+        val rebased = rebaseCitationForFinalAnswer(
+            citation = local,
+            providerAnswerStart = prefix.length,
+            finalAnswer = prefix + passAnswer,
+        )
+
+        assertEquals(prefix.length + localStart, rebased.anchors.single().startIndex)
+        assertEquals(prefix.length + localStart + cited.length, rebased.anchors.single().endIndex)
+    }
+
+    @Test
+    fun `provider citation rebase fails closed when exact recovery is ambiguous`() {
+        val cited = "same"
+        val local = requireNotNull(
+            CitationPolicy.create(
+                provider = "test",
+                kind = "document",
+                title = "Source",
+                providerSourceId = "source",
+                anchors = listOf(CitationAnchor(0, cited.length, cited)),
+                answerText = cited,
+            ),
+        )
+
+        val rebased = rebaseCitationForFinalAnswer(
+            citation = local,
+            providerAnswerStart = 1,
+            finalAnswer = "same same",
+        )
+
+        assertTrue(rebased.anchors.isEmpty())
+    }
+
+    @Test
+    fun `normal stop and partial failure retain one ordered citation`() {
+        val answer = "Claim tail"
+        val citation = requireNotNull(
+            CitationPolicy.create(
+                provider = "test",
+                kind = "web",
+                title = "Source",
+                url = "https://example.com/source",
+                anchors = listOf(CitationAnchor(0, 5, "Claim")),
+                answerText = answer,
+            ),
+        )
+
+        listOf(MessageStatus.SUCCESS, MessageStatus.STOPPED, MessageStatus.ERROR).forEach { status ->
+            val message = GenerationFinalSnapshot(
+                messageId = "model-$status",
+                parentId = "user",
+                text = answer,
+                images = emptyList(),
+                thoughts = "",
+                thoughtTitle = null,
+                tokenCount = 0,
+                tokenUsage = null,
+                status = status,
+                timestamp = 10L,
+                thoughtTimeMs = null,
+                modelName = "model-name",
+                flushedSegments = listOf(
+                    MessageSegment(type = "answer", content = "Claim"),
+                    citation.toMessageSegment(),
+                ),
+                answerBuffer = " tail",
+                thoughtBuffer = "",
+                thoughtSignature = null,
+                thoughtSignatureProvider = null,
+                thoughtDurationMs = null,
+                errorMessage = "Partial failure".takeIf { status == MessageStatus.ERROR },
+                runId = "run",
+                runSequence = 1L,
+            ).toMessage()
+
+            assertEquals(status, message.status)
+            assertEquals(listOf(citation), message.citationRecords())
+            assertEquals(1, message.segments?.count { it.type == "citation" })
+            assertEquals(
+                if (status == MessageStatus.ERROR) {
+                    listOf("answer", "error", "citation")
+                } else {
+                    listOf("answer", "citation")
+                },
+                message.segments?.map { it.type },
+            )
+        }
+    }
+
+    @Test
+    fun `terminal generation errors always retain a visible error value`() {
+        assertEquals(
+            "Generation failed",
+            terminalGenerationErrorMessage(
+                status = MessageStatus.ERROR,
+                currentError = null,
+                fallbackError = "Generation failed",
+            ),
+        )
+        assertEquals(
+            "Provider failed",
+            terminalGenerationErrorMessage(
+                status = MessageStatus.ERROR,
+                currentError = "Provider failed",
+                fallbackError = "Generation failed",
+            ),
+        )
+        assertNull(
+            terminalGenerationErrorMessage(
+                status = MessageStatus.SUCCESS,
+                currentError = null,
+                fallbackError = "Generation failed",
+            ),
+        )
+    }
+
+    @Test
+    fun `final text transform is field restricted and persistence bounded`() {
+        val original = ChatMessage(
+            id = "compact",
+            parentId = "parent",
+            text = "summary",
+            participant = com.newoether.agora.model.Participant.MODEL,
+            status = MessageStatus.SUCCESS,
+            runId = "fresh-run",
+            runSequence = 0,
+        )
+        val oversizedSuffix = "x".repeat(2_000_000)
+
+        val transformed = original.withBoundedFinalTextTransform { text, status ->
+            assertEquals(MessageStatus.SUCCESS, status)
+            text + oversizedSuffix
+        }
+
+        assertEquals(
+            MessagePersistenceGuard.clipText(original.text + oversizedSuffix),
+            transformed.text,
+        )
+        assertEquals(original, transformed.copy(text = original.text))
     }
 
     @Test

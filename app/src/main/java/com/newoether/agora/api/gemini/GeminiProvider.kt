@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -34,6 +35,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonNames
 import java.io.File
 import java.util.UUID
 
@@ -49,6 +51,7 @@ private fun extractThoughtTitle(content: String): String? =
 
 private fun ChatMessage.isGeminiToolRoundCompatible(
     targetModel: String,
+    targetProviderName: String,
     signatureRequired: Boolean,
 ): Boolean {
     val calls = segments
@@ -72,7 +75,8 @@ private fun ChatMessage.isGeminiToolRoundCompatible(
         if (signatureRequired && call.signature.isNullOrBlank()) return@all false
         if (call.signature.isNullOrBlank()) return@all true
         call.signatureProvider?.let { provider ->
-            return@all provider.equals(Constants.PROVIDER_GOOGLE, ignoreCase = true)
+            return@all provider.equals(Constants.PROVIDER_GOOGLE, ignoreCase = true) ||
+                provider == targetProviderName
         }
         modelName == null ||
             modelName.equals(targetModel, ignoreCase = true) ||
@@ -137,6 +141,8 @@ internal data class ApiRequestPart(
     val inlineData: ApiInlineData? = null,
     val thought: String? = null,
     @SerialName("thoughtSignature") val thoughtSignature: String? = null,
+    val executableCode: ApiExecutableCode? = null,
+    val codeExecutionResult: ApiCodeExecutionResult? = null,
     @SerialName("functionCall") val functionCall: GeminiFunctionCall? = null,
     @SerialName("functionResponse") val functionResponse: GeminiFunctionResponse? = null
 )
@@ -151,14 +157,15 @@ internal data class GeminiFunctionResponse(
 @Serializable
 internal data class ApiResponseContent(val role: String? = null, val parts: List<ApiResponsePart>)
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 internal data class ApiResponsePart(
     val text: String? = null,
     val thought: JsonElement? = null,
     @SerialName("thoughtSignature") val thoughtSignature: String? = null,
     @SerialName("reasoning_content") val reasoningContent: String? = null,
-    @SerialName("executable_code") val executableCode: ApiExecutableCode? = null,
-    @SerialName("code_execution_result") val codeExecutionResult: ApiCodeExecutionResult? = null,
+    @JsonNames("executable_code") val executableCode: ApiExecutableCode? = null,
+    @JsonNames("code_execution_result") val codeExecutionResult: ApiCodeExecutionResult? = null,
     @SerialName("functionCall") val functionCall: GeminiFunctionCall? = null
 )
 
@@ -176,6 +183,129 @@ internal data class ApiExecutableCode(val language: String, val code: String)
 @Serializable
 internal data class ApiCodeExecutionResult(val outcome: String, val output: String)
 
+private fun JsonObject.stringContent(key: String): String? =
+    (this[key] as? JsonPrimitive)?.content?.takeIf(String::isNotBlank)
+
+internal fun JsonObject.toGoogleSearchHostedUpdate(
+    streamKey: String,
+): StreamEvent.HostedToolCallUpdate {
+    val queries = (this["webSearchQueries"] as? JsonArray)
+        .orEmpty()
+        .mapNotNull { (it as? JsonPrimitive)?.content?.takeIf(String::isNotBlank) }
+    val seenUrls = mutableSetOf<String>()
+    val results = (this["groundingChunks"] as? JsonArray)
+        .orEmpty()
+        .mapNotNull { chunk ->
+            val web = (chunk as? JsonObject)?.get("web") as? JsonObject
+                ?: return@mapNotNull null
+            val url = web.stringContent("uri") ?: return@mapNotNull null
+            if (!seenUrls.add(url)) return@mapNotNull null
+            JsonObject(
+                linkedMapOf(
+                    "title" to JsonPrimitive(web.stringContent("title") ?: url),
+                    "url" to JsonPrimitive(url),
+                ),
+            )
+        }
+    val query = queries.joinToString(" · ")
+    val arguments = JsonObject(
+        if (query.isBlank()) emptyMap() else mapOf("query" to JsonPrimitive(query)),
+    )
+    val normalizedResult = linkedMapOf<String, JsonElement>(
+        "type" to JsonPrimitive("web_search"),
+        "provider" to JsonPrimitive("Google"),
+    )
+    if (query.isNotBlank()) normalizedResult["query"] = JsonPrimitive(query)
+    normalizedResult["results"] = JsonArray(results)
+    normalizedResult["grounding_metadata"] = this
+    return StreamEvent.HostedToolCallUpdate(
+        streamKey = streamKey,
+        name = "google_search",
+        arguments = arguments.toString(),
+        result = JsonObject(normalizedResult).toString(),
+    )
+}
+
+internal fun ApiExecutableCode.toCodeExecutionStart(
+    streamKey: String,
+): StreamEvent.HostedToolCallUpdate = StreamEvent.HostedToolCallUpdate(
+    streamKey = streamKey,
+    name = "code_execution",
+    arguments = JsonObject(
+        linkedMapOf(
+            "language" to JsonPrimitive(language),
+            "code" to JsonPrimitive(code),
+        ),
+    ).toString(),
+)
+
+internal fun ApiCodeExecutionResult.toCodeExecutionCompletion(
+    streamKey: String,
+    arguments: String,
+): StreamEvent.HostedToolCallUpdate = StreamEvent.HostedToolCallUpdate(
+    streamKey = streamKey,
+    name = "code_execution",
+    arguments = arguments,
+    result = JsonObject(
+        linkedMapOf(
+            "type" to JsonPrimitive("code_execution"),
+            "outcome" to JsonPrimitive(outcome),
+            "output" to JsonPrimitive(output),
+        ),
+    ).toString(),
+    isError = outcome.uppercase() !in setOf("OUTCOME_OK", "OK", "SUCCESS"),
+)
+
+internal fun geminiModelMessageParts(message: ChatMessage): List<ApiRequestPart> {
+    val segments = message.segments.orEmpty()
+    if (segments.none { it.type == "tool" && it.toolName == "code_execution" }) {
+        return message.text.takeIf(String::isNotEmpty)
+            ?.let { listOf(ApiRequestPart(text = it)) }
+            .orEmpty()
+    }
+    val parts = mutableListOf<ApiRequestPart>()
+    var includedAnswerSegment = false
+    segments.forEach { segment ->
+        when {
+            segment.type == "answer" && segment.content.isNotEmpty() -> {
+                includedAnswerSegment = true
+                parts += ApiRequestPart(text = segment.content)
+            }
+            segment.type == "tool" && segment.toolName == "code_execution" -> {
+                val arguments = runCatching {
+                    Json.parseToJsonElement(segment.toolArgs.orEmpty()) as? JsonObject
+                }.getOrNull()
+                val code = arguments?.stringContent("code")
+                if (code != null) {
+                    parts += ApiRequestPart(
+                        executableCode = ApiExecutableCode(
+                            language = arguments.stringContent("language") ?: "LANGUAGE_UNSPECIFIED",
+                            code = code,
+                        ),
+                    )
+                }
+                val result = runCatching {
+                    Json.parseToJsonElement(segment.toolResult.orEmpty()) as? JsonObject
+                }.getOrNull()
+                val outcome = result?.stringContent("outcome")
+                val output = result?.get("output") as? JsonPrimitive
+                if (outcome != null || output != null) {
+                    parts += ApiRequestPart(
+                        codeExecutionResult = ApiCodeExecutionResult(
+                            outcome = outcome ?: "OUTCOME_UNSPECIFIED",
+                            output = output?.content.orEmpty(),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+    if (!includedAnswerSegment && message.text.isNotEmpty()) {
+        parts.add(0, ApiRequestPart(text = message.text))
+    }
+    return parts
+}
+
 @Serializable
 internal data class ApiStreamResponse(
     val candidates: List<ApiCandidate>? = null,
@@ -184,10 +314,12 @@ internal data class ApiStreamResponse(
     val outcome: String? = null,
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 internal data class ApiCandidate(
     val content: ApiResponseContent? = null,
     @SerialName("finishReason") val finishReason: String? = null,
+    @JsonNames("grounding_metadata") val groundingMetadata: JsonObject? = null,
 )
 
 @Serializable
@@ -286,10 +418,11 @@ class GeminiProvider(
                 cleanModelName.contains("gemini-3.5", ignoreCase = true)
         val validatedPath = adaptToolRoundsForProvider(
             messages = canonicalPath,
-            providerName = "Gemini",
+            providerName = name,
         ) { toolMessage ->
             toolMessage.isGeminiToolRoundCompatible(
                 targetModel = cleanModelName,
+                targetProviderName = name,
                 signatureRequired = requiresFunctionCallSignature,
             )
         }
@@ -363,10 +496,13 @@ class GeminiProvider(
                 return@flatMap entries
             }
 
-            // Normal message: text + images only
-            val parts = mutableListOf<ApiRequestPart>()
-            if (msg.text.isNotEmpty()) {
-                parts.add(ApiRequestPart(text = msg.text))
+            // Normal message: preserve Gemini code-execution parts for model history.
+            val parts = if (msg.participant == Participant.MODEL) {
+                geminiModelMessageParts(msg).toMutableList()
+            } else {
+                mutableListOf<ApiRequestPart>().apply {
+                    if (msg.text.isNotEmpty()) add(ApiRequestPart(text = msg.text))
+                }
             }
             if (config.includeImages && msg.participant == Participant.USER) for (imagePath in msg.images) {
                 try {
@@ -379,7 +515,7 @@ class GeminiProvider(
                 } catch (e: Exception) {
                     DebugLog.e(
                         "AgoraAPI",
-                        "[Gemini] failed to encode image exception=${e.javaClass.simpleName}",
+                        "[$name] failed to encode image exception=${e.javaClass.simpleName}",
                     )
                 }
             }
@@ -493,13 +629,13 @@ class GeminiProvider(
             )
             val requestJson = json.encodeToString(ApiGenerateContentRequest.serializer(), requestBody)
             requireValidSerializedRequest(
-                provider = "Gemini",
+                provider = name,
                 body = requestJson,
                 requiredArrayFields = setOf("contents"),
             )
             DebugLog.d(
                 "AgoraAPI",
-                "[Gemini] request model=$cleanModelName messages=${apiContents.size} " +
+                "[$name] request model=$cleanModelName messages=${apiContents.size} " +
                     "thinking=${config.thinkingEnabled} tools=${tools.size}",
             )
             val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
@@ -534,6 +670,11 @@ class GeminiProvider(
                         var streamError: GenerationError? = null
                         var toolCallInFlight = false
                         val completedToolCallIds = mutableSetOf<String>()
+                        val pendingCodeExecutions = java.util.ArrayDeque<Pair<String, String>>()
+                        val googleSearchStreamKey = "gemini_google_search_${UUID.randomUUID()}"
+                        var lastGroundingMetadata: String? = null
+                        var latestGroundingMetadata: JsonObject? = null
+                        val answerText = StringBuilder()
 
                         suspend fun emitTracked(event: StreamEvent) {
                             if (event.carriesModelOutput()) producedContent = true
@@ -565,8 +706,8 @@ class GeminiProvider(
                                         code = error.code?.toString(),
                                         type = error.status,
                                         message = error.message?.ifBlank {
-                                            "Gemini reported an error in the response stream"
-                                        } ?: "Gemini reported an error in the response stream",
+                                            "$name reported an error in the response stream"
+                                        } ?: "$name reported an error in the response stream",
                                     )
                                 }
                                 if (streamError == null && ProviderRetryPolicy.isFailedToGenerateOutcome(response.outcome)) {
@@ -575,6 +716,16 @@ class GeminiProvider(
                                 val candidate = response.candidates?.firstOrNull()
                                 candidate?.finishReason?.takeIf(String::isNotBlank)?.let {
                                     finishReason = normalizeGeminiFinishReason(it)
+                                }
+                                candidate?.groundingMetadata?.let { metadata ->
+                                    latestGroundingMetadata = metadata
+                                    val snapshot = metadata.toString()
+                                    if (snapshot != lastGroundingMetadata) {
+                                        lastGroundingMetadata = snapshot
+                                        emitTracked(
+                                            metadata.toGoogleSearchHostedUpdate(googleSearchStreamKey),
+                                        )
+                                    }
                                 }
                                 inThoughtBlock = false
                                 candidate?.content?.parts?.forEach { part ->
@@ -606,13 +757,28 @@ class GeminiProvider(
                                         if (isPartOfThought || inThoughtBlock) {
                                             emitTracked(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it), currentThoughtSignature))
                                             inThoughtBlock = false
-                                        } else emitTracked(StreamEvent.TextChunk(it))
+                                        } else {
+                                            answerText.append(it)
+                                            emitTracked(StreamEvent.TextChunk(it))
+                                        }
                                     }
-                                    part.executableCode?.let {
-                                        emitTracked(StreamEvent.TextChunk("\n```${it.language}\n${it.code}\n```\n"))
+                                    part.executableCode?.let { code ->
+                                        val active = code.toCodeExecutionStart(
+                                            streamKey = "gemini_code_execution_${UUID.randomUUID()}",
+                                        )
+                                        pendingCodeExecutions.addLast(active.streamKey to active.arguments)
+                                        emitTracked(active)
                                     }
-                                    part.codeExecutionResult?.let {
-                                        emitTracked(StreamEvent.TextChunk("\n> Output: ${it.output}\n"))
+                                    part.codeExecutionResult?.let { result ->
+                                        val pending = pendingCodeExecutions.pollFirst()
+                                        val streamKey = pending?.first
+                                            ?: "gemini_code_execution_${UUID.randomUUID()}"
+                                        emitTracked(
+                                            result.toCodeExecutionCompletion(
+                                                streamKey = streamKey,
+                                                arguments = pending?.second ?: "{}",
+                                            ),
+                                        )
                                     }
                                     part.functionCall?.let { fc ->
                                         val callId = fc.id ?: "call_${UUID.randomUUID()}"
@@ -641,12 +807,15 @@ class GeminiProvider(
                                         }
                                     }
                                 }
+                                candidate?.groundingMetadata
+                                    ?.toGeminiCitations(answerText.toString())
+                                    ?.forEach { citation -> emit(StreamEvent.CitationUpdate(citation)) }
                                 response.usageMetadata?.let { emit(StreamEvent.UsageUpdate(it.toTokenUsage())) }
                                 if (streamError != null || finishReason != null) break
                             } catch (e: Exception) {
                                 DebugLog.e(
                                     "AgoraAPI",
-                                    "[Gemini] malformed stream payload exception=${e.javaClass.simpleName}",
+                                    "[$name] malformed stream payload exception=${e.javaClass.simpleName}",
                                 )
                                 streamError = GenerationError.SseParse(
                                     rawLine = jsonStr.take(512),
@@ -662,14 +831,19 @@ class GeminiProvider(
                             producedContent,
                             streamError,
                             timedOut,
-                            toolCallInFlight,
+                            toolCallInFlight || pendingCodeExecutions.isNotEmpty(),
                         )
-                        DebugLog.d("AgoraSSE", "[Gemini] ${termination.describe()}")
+                        if (!(termination.isRetryable && attempt < maxAttempts)) {
+                            latestGroundingMetadata
+                                ?.toGeminiCitations(answerText.toString())
+                                ?.forEach { citation -> emit(StreamEvent.CitationUpdate(citation)) }
+                        }
+                        DebugLog.d("AgoraSSE", "[$name] ${termination.describe()}")
                         if (termination.isRetryable && attempt < maxAttempts) {
                             emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
                             delay(ProviderRetryPolicy.delayMillis(attempt))
                         } else {
-                            termination.toError("Gemini")?.let { emit(StreamEvent.Error(it)) }
+                            termination.toError(name)?.let { emit(StreamEvent.Error(it)) }
                             done = true
                         }
                     } else {
@@ -677,7 +851,7 @@ class GeminiProvider(
                         val responseBytes = errorRaw.toByteArray(Charsets.UTF_8).size
                         DebugLog.e(
                             "AgoraAPI",
-                            "[Gemini] HTTP ${handle.code} responseBytes=$responseBytes",
+                            "[$name] HTTP ${handle.code} responseBytes=$responseBytes",
                         )
                         val retryable = ProviderRetryPolicy.shouldRetryHttp(
                             handle.code,
@@ -709,8 +883,8 @@ class GeminiProvider(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: RequestFormatException) {
-            DebugLog.e("AgoraAPI", "[Gemini] blocked invalid request: ${e.violations.joinToString()}")
-            emit(StreamEvent.Error(GenerationError.RequestFormat("Gemini", e.violations.joinToString())))
+            DebugLog.e("AgoraAPI", "[$name] blocked invalid request: ${e.violations.joinToString()}")
+            emit(StreamEvent.Error(GenerationError.RequestFormat(name, e.violations.joinToString())))
         } catch (e: java.net.SocketTimeoutException) {
             emit(StreamEvent.Error(GenerationError.Timeout))
         } catch (e: java.net.ConnectException) {

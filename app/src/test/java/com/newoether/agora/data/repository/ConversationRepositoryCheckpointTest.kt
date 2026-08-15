@@ -3,10 +3,13 @@ package com.newoether.agora.data.repository
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.MessageStreamCheckpoint
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationAnchor
+import com.newoether.agora.model.CitationPolicy
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.TokenUsage
+import com.newoether.agora.model.toMessageSegment
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -26,7 +29,21 @@ class ConversationRepositoryCheckpointTest {
         val captured = slot<MessageStreamCheckpoint>()
         coEvery { dao.updateMessageCheckpoint(capture(captured)) } returns 1
         val repository = ConversationRepository(dao)
-        val segment = MessageSegment(type = "answer", content = "partial answer")
+        val answer = "partial answer"
+        val citation = requireNotNull(
+            CitationPolicy.create(
+                provider = "test",
+                kind = "web",
+                title = "Source",
+                url = "https://example.com/source",
+                anchors = listOf(CitationAnchor(0, 7, "partial")),
+                answerText = answer,
+            ),
+        )
+        val segments = listOf(
+            MessageSegment(type = "answer", content = answer),
+            citation.toMessageSegment(),
+        )
 
         val updated = repository.updateStreamingMessageCheckpoint(
             ChatMessage(
@@ -50,7 +67,7 @@ class ConversationRepositoryCheckpointTest {
                 timestamp = 1234,
                 thoughtTimeMs = 987,
                 modelName = "provider:model",
-                segments = listOf(segment),
+                segments = segments,
             )
         )
 
@@ -69,7 +86,7 @@ class ConversationRepositoryCheckpointTest {
         assertEquals(MessageStatus.THINKING, captured.captured.status)
         assertEquals(987L, captured.captured.thoughtTimeMs)
         assertEquals(
-            listOf(segment),
+            segments,
             Json.decodeFromString<List<MessageSegment>>(captured.captured.toolCallJson!!),
         )
         coVerify(exactly = 1) { dao.updateMessageCheckpoint(any()) }

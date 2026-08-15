@@ -72,20 +72,6 @@ sealed interface RunState {
         }
     }
 
-    /** One isolated Context Compact generation in the ordinary conversation generation slot. */
-    data class Compacting(
-        val effectIdentity: RunEffectIdentity,
-        val compactRunId: String,
-    ) : RunState {
-        override val conversationId: String = effectIdentity.conversationId
-        val generationIdentity: RuntimeRunIdentity = effectIdentity.runIdentity()
-
-        init {
-            require(compactRunId.isNotBlank())
-            require(effectIdentity.runId == compactRunId)
-            require(effectIdentity.pass == 0)
-        }
-    }
 
     data class Stopping(
         val identity: RuntimeRunIdentity,
@@ -152,11 +138,6 @@ sealed interface RunToolPhase {
     ) : RunToolPhase
 }
 
-enum class CompactOutcome {
-    CREATED,
-    NOT_NEEDED,
-    FAILED,
-}
 
 enum class ProviderPassResult {
     COMPLETED_TEXT,

@@ -22,10 +22,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.data.modelAliasDisplayName
 import com.newoether.agora.data.providerDisplayName
 import com.newoether.agora.ui.common.PersistedSliderFeedbackGate
 import com.newoether.agora.ui.components.providerIcon
-import com.newoether.agora.model.apiModelName
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.ChatViewModel
 
@@ -101,9 +101,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     title = stringResource(R.string.transcription_model),
                     items = listOf({
                         val displayName = transcriptionModel?.let {
-                            val parsed = com.newoether.agora.model.ModelId.parse(it)
-                            val alias = modelAliases[it]
-                            alias ?: parsed.apiModelName
+                            modelAliasDisplayName(it, modelAliases, customProviders)
                         } ?: stringResource(R.string.transcription_no_model)
                         val selectedProvider = transcriptionModel?.let {
                             providerDisplayName(
@@ -151,9 +149,12 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     } else {
                         val sorted = transcriptionEnabledModels.toList().sortedBy { it }
                         for (model in sorted) {
-                            val alias = modelAliases[model]
                             val parsedModel = com.newoether.agora.model.ModelId.parse(model)
-                            val displayName = alias ?: parsedModel.apiModelName
+                            val displayName = modelAliasDisplayName(
+                                model,
+                                modelAliases,
+                                customProviders,
+                            )
                             val providerName = providerDisplayName(
                                 parsedModel.providerName,
                                 customProviders,
@@ -330,9 +331,12 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         )
                     }
                     items(enabledModelsList, key = { it }) { model ->
-                        val alias = modelAliases[model]
                         val dialogParsed = com.newoether.agora.model.ModelId.parse(model)
-                        val displayName = alias ?: dialogParsed.apiModelName
+                        val displayName = modelAliasDisplayName(
+                            model,
+                            modelAliases,
+                            customProviders,
+                        )
                         SettingsItem(
                             headlineContent = { Text(displayName, fontWeight = if (transcriptionModel == model) FontWeight.Bold else FontWeight.Normal) },
                             supportingContent = { Text(providerDisplayName(dialogParsed.providerName, customProviders), style = MaterialTheme.typography.bodySmall) },
@@ -364,9 +368,12 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
                     items(availableList, key = { it }) { model ->
-                        val alias = modelAliases[model]
                         val addParsed = com.newoether.agora.model.ModelId.parse(model)
-                        val displayName = alias ?: addParsed.apiModelName
+                        val displayName = modelAliasDisplayName(
+                            model,
+                            modelAliases,
+                            customProviders,
+                        )
                         val checked = model in selected
                         SettingsItem(
                             headlineContent = { Text(displayName) },

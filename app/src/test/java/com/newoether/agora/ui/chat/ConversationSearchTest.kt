@@ -1,8 +1,11 @@
 package com.newoether.agora.ui.chat
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationPolicy
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.toMessageSegment
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConversationSearchTest {
@@ -82,5 +85,32 @@ class ConversationSearchTest {
 
         assertEquals(1, matches.size)
         assertEquals(message.text.indexOf("kotlin", startIndex = 4), matches.single().start)
+    }
+
+    @Test
+    fun citationSearchMatchesOnlySourceTitles() {
+        val citation = requireNotNull(
+            CitationPolicy.create(
+                provider = "openai",
+                kind = "url",
+                title = "Kotlin language guide",
+                url = "https://private.example/internal-path",
+                providerSourceId = "turn0search7",
+            ),
+        )
+        val message = ChatMessage(
+            id = "assistant",
+            text = "Answer without the source metadata.",
+            participant = Participant.MODEL,
+            segments = listOf(citation.toMessageSegment()),
+        )
+
+        val titleMatches = findConversationSearchMatches(listOf(message), "language")
+
+        assertEquals(1, titleMatches.size)
+        assertEquals(citation.sourceId, titleMatches.single().citationSourceId)
+        assertTrue(titleMatches.single().key.contains(":citation:"))
+        assertTrue(findConversationSearchMatches(listOf(message), "private.example").isEmpty())
+        assertTrue(findConversationSearchMatches(listOf(message), "turn0search7").isEmpty())
     }
 }

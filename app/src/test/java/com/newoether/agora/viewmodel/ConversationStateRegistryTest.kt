@@ -46,6 +46,54 @@ class ConversationStateRegistryTest {
     }
 
     @Test
+    fun stopSettlementAfterUiReplacementUsesTheSharedDrainCallback() = runBlocking {
+        val registry = ConversationStateRegistry()
+        val firstOwner = Any()
+        val secondOwner = Any()
+        var firstDrainCount = 0
+        var secondDrainCount = 0
+        registry.attachUiCallbacks(firstOwner) { state ->
+            state.onQueueDrainRequested = { firstDrainCount += 1 }
+        }
+        val state = registry.getOrCreate("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run")
+        val unwind = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val job = checkNotNull(
+            state.launchGenerationJob(token) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { unwind.await() }
+            },
+        )
+        state.enqueueSend(QueuedSend("queued", "text", "model", emptyList(), "queued-run"))
+        val stopped = state.stop()
+
+        registry.detachUiCallbacks(firstOwner)
+        registry.attachUiCallbacks(secondOwner) { rebound ->
+            rebound.onQueueDrainRequested = { secondDrainCount += 1 }
+        }
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.RECORDED,
+            state.finishStopFinalization(
+                ConversationCommand.PersistenceSettled(
+                    identity = requireNotNull(stopped.finalizationEffect).identity,
+                    success = true,
+                ),
+            ),
+        )
+        unwind.complete(Unit)
+        job.join()
+        withTimeout(5_000) {
+            while (secondDrainCount == 0) yield()
+        }
+
+        assertEquals(0, firstDrainCount)
+        assertEquals(1, secondDrainCount)
+        assertFalse(state.generating.value)
+        assertFalse(state.stopping.value)
+        registry.remove("conversation")
+    }
+
+    @Test
     fun staleOwnerCannotDetachNewerUiCallbacks() {
         val registry = ConversationStateRegistry()
         val firstOwner = Any()

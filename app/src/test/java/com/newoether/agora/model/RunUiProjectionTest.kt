@@ -173,7 +173,7 @@ class RunUiProjectionTest {
     }
 
     @Test
-    fun multipleAssistantsAfterOneUser_onlyExposeActionsOnTheLastAssistant() {
+    fun adjacentAssistantsFromDifferentRuns_keepIndependentActions() {
         val messages = listOf(
             message("u0", "prompt", Participant.USER, "run-a", 0),
             message("m0", "partial", Participant.MODEL, "run-a", 1, parentId = "u0"),
@@ -183,9 +183,10 @@ class RunUiProjectionTest {
         val projected = RunUiProjection.project(messages, messages)
 
         assertTrue(projected.getValue("u0").showActions)
-        assertFalse(projected.getValue("m0").showActions)
+        assertTrue(projected.getValue("m0").showActions)
+        assertEquals("m0", projected.getValue("m0").deleteTargetMessageId)
         assertTrue(projected.getValue("m1").showActions)
-        assertEquals("m0", projected.getValue("m1").deleteTargetMessageId)
+        assertEquals("m1", projected.getValue("m1").deleteTargetMessageId)
     }
 
     @Test
@@ -197,9 +198,10 @@ class RunUiProjectionTest {
 
         val projected = RunUiProjection.project(messages, messages)
 
-        assertFalse(projected.getValue("m0").showActions)
+        assertTrue(projected.getValue("m0").showActions)
+        assertEquals("m0", projected.getValue("m0").deleteTargetMessageId)
         assertTrue(projected.getValue("m1").showActions)
-        assertEquals("m0", projected.getValue("m1").deleteTargetMessageId)
+        assertEquals("m1", projected.getValue("m1").deleteTargetMessageId)
         assertFalse(projected.getValue("m1").showBranchSelector)
     }
 

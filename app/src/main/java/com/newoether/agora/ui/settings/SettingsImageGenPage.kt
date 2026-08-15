@@ -24,9 +24,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.data.modelAliasDisplayName
 import com.newoether.agora.data.providerDisplayName
 import com.newoether.agora.model.ModelId
-import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.noOpBringIntoView
@@ -121,7 +121,9 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         // Only a properly prefixed "Provider:modelId" counts as a real selection;
                         // legacy/bare ids (e.g. an old "gpt-image-1") render as "no model selected".
                         val parsed = selectedModel?.takeIf { it.contains(":") }?.let { ModelId.parse(it) }
-                        val displayName = parsed?.let { modelAliases[selectedModel] ?: it.apiModelName }
+                        val displayName = selectedModel
+                            ?.takeIf { parsed != null }
+                            ?.let { modelAliasDisplayName(it, modelAliases, customProviders) }
                             ?: stringResource(R.string.image_gen_no_model)
                         val providerName = parsed?.let {
                             providerDisplayName(it.providerName, customProviders)
@@ -217,7 +219,11 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         LazyColumn(modifier = Modifier.fillMaxWidth()) {
                             items(pickList, key = { it }) { model ->
                             val parsed = ModelId.parse(model)
-                            val displayName = modelAliases[model] ?: parsed.apiModelName
+                            val displayName = modelAliasDisplayName(
+                                model,
+                                modelAliases,
+                                customProviders,
+                            )
                             SettingsItem(
                                 headlineContent = { Text(displayName, fontWeight = if (selectedModel == model) FontWeight.Bold else FontWeight.Normal) },
                                 supportingContent = { Text(providerDisplayName(parsed.providerName, customProviders), style = MaterialTheme.typography.bodySmall) },

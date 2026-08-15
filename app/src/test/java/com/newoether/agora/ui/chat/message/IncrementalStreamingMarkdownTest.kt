@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -169,6 +170,30 @@ class IncrementalStreamingMarkdownTest {
             }
         )
         assertEquals(3, faded.spanStyles.size)
+    }
+
+    @Test
+    fun directGlyphAlphaPreservesInlineContentAnnotation() {
+        val base = AnnotatedString.Builder().apply {
+            appendInlineContent(
+                id = "citation-inline:test",
+                alternateText = "[openai.com]",
+            )
+        }.toAnnotatedString()
+
+        val faded = streamingTailAnnotatedString(
+            text = base,
+            color = Color.White,
+            fadeCodePoints = 4,
+            bands = 2,
+            newestAlpha = 0.4f,
+        )
+
+        assertEquals("[openai.com]", faded.text)
+        assertTrue(
+            faded.getStringAnnotations(start = 0, end = faded.length)
+                .any { it.item == "citation-inline:test" },
+        )
     }
 
     @Test

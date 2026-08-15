@@ -6,8 +6,10 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ThinkingSegmentDisplayModes
 import com.newoether.agora.ui.chat.bottombar.contextUsageAtCapacity
+import com.newoether.agora.ui.chat.bottombar.contextUsageExceedsCompactThreshold
+import com.newoether.agora.ui.chat.message.ContextCompactPillPresentation
 import com.newoether.agora.ui.chat.message.SegmentSheetBackAction
-import com.newoether.agora.ui.chat.message.messageEntranceInitialScale
+import com.newoether.agora.ui.chat.message.contextCompactPillPresentation
 import com.newoether.agora.ui.chat.message.segmentSheetBackAction
 import com.newoether.agora.ui.chat.message.usesExplicitDetailBackHandler
 import com.newoether.agora.ui.chat.message.usesVirtualizedSegmentDetail
@@ -55,7 +57,7 @@ class CompactMessagePresentationTest {
     }
 
     @Test
-    fun terminalCompactUsesThinkingVirtualizedDetailLoader() {
+    fun historicalTerminalThoughtCanUseTheVirtualizedDetailLoader() {
         assertTrue(
             usesVirtualizedSegmentDetail(
                 selectedSegmentCount = 1,
@@ -98,6 +100,16 @@ class CompactMessagePresentationTest {
         assertTrue(usesExplicitDetailBackHandler(ThinkingSegmentDisplayModes.BOTTOM_SHEET))
         assertFalse(usesExplicitDetailBackHandler(ThinkingSegmentDisplayModes.CARD))
         assertFalse(usesExplicitDetailBackHandler("unknown"))
+    }
+
+    @Test
+    fun contextProgressUsesConfiguredCompactThresholdBoundaries() {
+        assertFalse(contextUsageExceedsCompactThreshold(50, 100, 50))
+        assertTrue(contextUsageExceedsCompactThreshold(51, 100, 50))
+        assertFalse(contextUsageExceedsCompactThreshold(90, 100, 90))
+        assertTrue(contextUsageExceedsCompactThreshold(91, 100, 90))
+        assertFalse(contextUsageExceedsCompactThreshold(100, 100, 100))
+        assertFalse(contextUsageExceedsCompactThreshold(1, 0, 90))
     }
 
     @Test
@@ -161,20 +173,6 @@ class CompactMessagePresentationTest {
     }
 
     @Test
-    fun compactEntranceAddsScaleToTheSharedOneShotFadeAnimation() {
-        assertEquals(
-            0.9f,
-            messageEntranceInitialScale(message("compact_boundary", Participant.MODEL)),
-            0f,
-        )
-        assertEquals(
-            1f,
-            messageEntranceInitialScale(message("assistant", Participant.MODEL)),
-            0f,
-        )
-    }
-
-    @Test
     fun compactGenerationDoesNotOwnTheOrdinaryAssistantStreamingTail() {
         val compact = message("compact_boundary", Participant.MODEL).copy(
             status = MessageStatus.SENDING,
@@ -196,6 +194,14 @@ class CompactMessagePresentationTest {
                 isStopping = false,
                 message = assistant,
             ),
+        )
+    }
+
+    @Test
+    fun stoppedCompactUsesDedicatedStoppedPillPresentation() {
+        assertEquals(
+            ContextCompactPillPresentation.STOPPED,
+            contextCompactPillPresentation(MessageStatus.STOPPED),
         )
     }
 

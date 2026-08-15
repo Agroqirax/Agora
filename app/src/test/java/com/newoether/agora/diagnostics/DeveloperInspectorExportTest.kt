@@ -1,5 +1,6 @@
 package com.newoether.agora.diagnostics
 
+import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ConversationRuntimeTraceEntry
@@ -157,6 +158,70 @@ class DeveloperInspectorExportTest {
         assertTrue(exported.contains("omittedEventCount"))
         assertTrue(exported.contains("44"))
         assertTrue(exported.contains("redactedExport"))
+    }
+
+    @Test
+    fun `diagnostic display projection replaces custom provider ids with current alias`() {
+        val providerId = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val providers = listOf(CustomProviderConfig(name = "Relay Alias", id = providerId))
+        val rawBody = """{"model":"$providerId:model"}"""
+        val rawSnapshot = DiagnosticSnapshot(
+            events = listOf(
+                DiagnosticEvent(
+                    sequence = 1L,
+                    timestampMillis = 1L,
+                    context = DiagnosticRequestContext(
+                        provider = providerId,
+                        model = "$providerId:model",
+                    ),
+                    payload = DiagnosticEventPayload.HttpRequest(
+                        method = "POST",
+                        url = CapturedDiagnosticText(
+                            value = "https://example.invalid",
+                            originalLength = 23,
+                            truncated = false,
+                            redacted = true,
+                        ),
+                        headers = mapOf("X-Provider" to providerId),
+                        body = CapturedDiagnosticText(
+                            value = rawBody,
+                            originalLength = rawBody.length,
+                            truncated = false,
+                            redacted = true,
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val displaySnapshot = rawSnapshot.forDisplay(providers)
+        val displayInspection = checkNotNull(
+            DeveloperConversationInspector.inspect(
+                conversation = ChatConversation(
+                    id = CONVERSATION_ID,
+                    title = "diagnostic fixture",
+                    modelId = "$providerId:model",
+                    origin = "user",
+                ),
+                messages = emptyList(),
+                totalTokens = 0,
+                isLoading = false,
+                runtimeTransitions = emptyList(),
+            ),
+        ).forDisplay(providers)
+
+        assertEquals("Relay Alias", displaySnapshot.events.single().context.provider)
+        assertEquals("Relay Alias:model", displaySnapshot.events.single().context.model)
+        assertEquals("Relay Alias:model", displayInspection.model)
+        assertFalse(displaySnapshot.toString().contains(providerId))
+        assertFalse(displayInspection.toString().contains(providerId))
+
+        val exported = DiagnosticBundleExporter.exportRedacted(
+            snapshot = displaySnapshot,
+            conversation = displayInspection,
+            generatedAtMillis = 2L,
+        )
+        assertFalse(exported.contains(providerId))
+        assertTrue(exported.contains("Relay Alias"))
     }
 
     @Test

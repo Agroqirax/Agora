@@ -2,6 +2,7 @@ package com.newoether.agora.model
 
 import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 import java.util.UUID
 
 @Serializable
@@ -18,6 +19,10 @@ data class ToolCallData(
     val resultText: String? = null,
     /** Provider-declared structured result JSON, never inferred from arbitrary text. */
     val structuredResult: String? = null,
+    /** Raw provider protocol items needed to reconstruct a stateless tool continuation. */
+    val responseOutputItems: List<JsonObject> = emptyList(),
+    /** Provider identity that owns [responseOutputItems]; foreign transports must ignore them. */
+    val responseOutputItemProvider: String? = null,
 )
 
 @Serializable
@@ -32,7 +37,7 @@ data class ToolImageAttachment(
 
 @Serializable
 data class MessageSegment(
-    val type: String, // "answer", "thought", "tool", "transcription", or terminal "error"
+    val type: String, // "answer", "thought", "tool", "citation", "transcription", or terminal "error"
     val content: String = "",
     val toolName: String? = null,
     val toolArgs: String? = null,
@@ -60,6 +65,10 @@ data class MessageSegment(
     val toolStructuredResult: String? = null,
     /** Private-file metadata for image content returned by a tool. */
     val toolImages: List<ToolImageAttachment> = emptyList(),
+    /** Raw provider protocol items needed to reconstruct a stateless tool continuation. */
+    val responseOutputItems: List<JsonObject> = emptyList(),
+    /** Provider identity that owns [responseOutputItems]; foreign transports must ignore them. */
+    val responseOutputItemProvider: String? = null,
 )
 
 object ToolExecutionStates {

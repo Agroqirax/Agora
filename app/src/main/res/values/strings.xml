@@ -16,6 +16,7 @@
     <string name="tools">Tools</string>
     <string name="code_execution">Code Execution</string>
     <string name="google_search">Google Search</string>
+    <string name="openai_search">OpenAI Search</string>
     <string name="thinking">Thinking</string>
     <string name="web_search">Web Search</string>
     <string name="ask_agora">Ask Agora anything...</string>
@@ -171,6 +172,7 @@
     <string name="token_usage_detail">Input %1$s · Output %2$s</string>
     <string name="token_usage_detail_cached">Input %1$s (%2$s cached) · Output %3$s</string>
     <string name="thinking_ellipsis">Thinking...</string>
+    <string name="thinking_for_seconds_ellipsis">Thinking for %1$ds...</string>
     <string name="answering_ellipsis">Answering...</string>
     <string name="sending_ellipsis">Sending...</string>
     <string name="tool_calling_ellipsis">Calling tool...</string>
@@ -185,7 +187,12 @@
     <string name="import_invalid_gguf_title">Invalid GGUF File</string>
     <string name="import_invalid_gguf_desc">The selected file is not a valid GGUF model.</string>
     <string name="ok">OK</string>
-    <string name="generation_retry_attempt">Retry %1$d/%2$d</string>
+    <string name="citation_sources">Sources</string>
+    <string name="citation_source_accessibility">Source %1$d: %2$s</string>
+    <string name="citation_source_file">File</string>
+    <string name="citation_source_location">Location</string>
+    <string name="generation_retry_attempt">Retrying %1$d/%2$d</string>
+    <string name="select_text">Select Text</string>
     <string name="action">Action</string>
     <string name="video">Video</string>
 
@@ -207,7 +214,7 @@
     <string name="settings_models">Models</string>
     <string name="settings_models_desc">Enable, disable, and configure AI models</string>
     <string name="settings_generation">Generation</string>
-    <string name="settings_generation_desc">LLM parameters and context window</string>
+    <string name="settings_generation_desc">LLM parameters</string>
     <string name="settings_web_search">Web Search</string>
     <string name="settings_web_search_desc">Configure web search tool for all providers</string>
     <string name="settings_title_gen">Title Generation</string>
@@ -460,10 +467,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">Privacy-focused search API. Free tier available.</string>
     <string name="web_search_kagi_desc">Premium search API with personalized results. Pay per use.</string>
@@ -1112,12 +1115,26 @@
     <string name="context_compact_select_model">Select compact model</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">Messages preserved verbatim after each compact</string>
+    <string name="context_compact_threshold">Automatic compact threshold</string>
+    <string name="context_compact_threshold_desc">Compact when estimated context reaches this percentage of the selected window</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
+    <string name="context_compact_failed">Compact failed</string>
     <string name="context_compact_select_available_model">Select an available model</string>
     <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
     <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
     <string name="context_usage_messages">~%1$s / %2$s tokens</string>
+    <string name="context_compact_streaming">Context compacting…</string>
+    <string name="context_compact_error">Compact error</string>
+    <string name="context_compact_stopped">Compact stopped</string>
+    <string name="context_compact_setup_unavailable">Compact setup is unavailable</string>
+    <string name="context_compact_setup_failed">Compact setup failed</string>
+    <string name="context_compact_not_ready_recompact">Compact message is not ready to recompact</string>
+    <string name="context_compact_boundary_disappeared">Compact boundary disappeared</string>
+    <string name="context_compact_wait_for_generation">Wait for the current generation to finish</string>
+    <string name="context_compact_generation_not_started">Compact generation did not start</string>
+    <string name="context_compact_message_disappeared">Compact message disappeared</string>
+    <string name="context_compact_open_conversation">Open a conversation first</string>
     <string name="context_boundary_active">Compact boundary active</string>
     <string name="context_boundary_none">No compact boundary</string>
     <string name="thinking_segment_display_mode">Thinking segments</string>
@@ -1169,4 +1186,31 @@
     <string name="developer_options_export_desc">Share a bounded JSON bundle. Sensitive content is redacted, and the file is never uploaded automatically.</string>
     <string name="developer_options_export_share_title">Share Agora diagnostic bundle</string>
     <string name="developer_options_export_failed">Could not create the diagnostic bundle.</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">Use the provider’s /responses endpoint instead of Chat Completions.</string>
+
+    <!-- Localized chat presentation for typed generation failures. -->
+    <string name="generation_error_authentication">Authentication failed. Check your API key.</string>
+    <string name="generation_error_rate_limit">Rate limit exceeded. Wait a moment, then try again.</string>
+    <string name="generation_error_server">Server error (%1$d). The service may be temporarily unavailable.</string>
+    <string name="generation_error_network">Network error: %1$s</string>
+    <string name="generation_error_network_http">Network error (%1$d): %2$s</string>
+    <string name="generation_error_sse_parse">The server response could not be read.</string>
+    <string name="generation_error_incomplete_stream">%1$s ended the response early. No completion signal arrived, so the reply is incomplete.</string>
+    <string name="generation_error_incomplete_tool_stream">%1$s ended the response early while a tool call was still being written. No completion signal arrived, so the reply is incomplete.</string>
+    <string name="generation_error_incomplete_stream_reason">%1$s ended the response early after stop reason %2$s, without a completion signal.</string>
+    <string name="generation_error_incomplete_tool_stream_reason">%1$s ended the response early after stop reason %2$s while a tool call was still being written.</string>
+    <string name="generation_error_output_truncated">The response reached the output token limit (%1$s) and was cut off.</string>
+    <string name="generation_error_tool_execution">Tool %1$s failed: %2$s</string>
+    <string name="generation_error_transcription">Image transcription failed: %1$s</string>
+    <string name="generation_error_embedding">Embedding failed: %1$s</string>
+    <string name="generation_error_request_format">Request validation failed before sending (%1$s): %2$s</string>
+    <string name="generation_error_cancelled">Generation cancelled.</string>
+    <string name="generation_error_timeout">The request timed out.</string>
+    <string name="generation_error_unexpected">An unexpected error occurred.</string>
+    <string name="generation_error_connection_closed">Connection closed.</string>
+    <string name="generation_error_connection_refused">Connection refused.</string>
+    <string name="generation_error_connection_reset">Connection reset.</string>
+    <string name="generation_error_unknown_host">The host could not be found.</string>
+    <string name="generation_error_tls_failure">The secure connection failed.</string>
 </resources>

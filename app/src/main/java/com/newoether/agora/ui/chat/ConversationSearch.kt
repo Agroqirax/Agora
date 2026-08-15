@@ -2,6 +2,7 @@ package com.newoether.agora.ui.chat
 
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.citationRecords
 import com.newoether.agora.ui.chat.message.escapeForMarkdown
 import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.MarkdownTokenTypes
@@ -14,8 +15,11 @@ internal data class ConversationSearchMatch(
     val start: Int,
     val endExclusive: Int,
     val occurrenceInMessage: Int,
+    val citationSourceId: String? = null,
 ) {
-    val key: String get() = "$messageId:$start:$endExclusive"
+    val key: String get() = citationSourceId?.let { sourceId ->
+        "$messageId:citation:$sourceId:$start:$endExclusive"
+    } ?: "$messageId:$start:$endExclusive"
 }
 
 internal fun caseInsensitiveMatchRanges(text: String, query: String): List<IntRange> {
@@ -38,16 +42,29 @@ internal fun findConversationSearchMatches(
     if (query.isBlank()) return emptyList()
     return buildList {
         messages.forEach { message ->
-            conversationSearchMatchRanges(message, query).forEachIndexed {
-                    occurrence, range ->
+            var occurrence = 0
+            conversationSearchMatchRanges(message, query).forEach { range ->
                 add(
                     ConversationSearchMatch(
                         messageId = message.id,
                         start = range.first,
                         endExclusive = range.last + 1,
-                        occurrenceInMessage = occurrence,
-                    )
+                        occurrenceInMessage = occurrence++,
+                    ),
                 )
+            }
+            message.citationRecords().forEach { citation ->
+                caseInsensitiveMatchRanges(citation.title, query).forEach { range ->
+                    add(
+                        ConversationSearchMatch(
+                            messageId = message.id,
+                            start = range.first,
+                            endExclusive = range.last + 1,
+                            occurrenceInMessage = occurrence++,
+                            citationSourceId = citation.sourceId,
+                        ),
+                    )
+                }
             }
         }
     }

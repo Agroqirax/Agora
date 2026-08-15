@@ -44,6 +44,7 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageGenerationBoundaryResolver
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.copyTextWithCitations
 import com.newoether.agora.model.RunMessagePresentation
 import com.newoether.agora.model.RunUiProjection
 import com.newoether.agora.model.StableMessageList
@@ -758,7 +759,14 @@ internal fun MessageList(
             showActions = !selectionMode && presentation?.showActions == true,
             actionCopyText = presentation
                 ?.takeIf { it.showActions }
-                ?.let { message.text.takeIf(String::isNotBlank) },
+                ?.let {
+                    val copyText = if (message.participant == Participant.MODEL) {
+                        message.copyTextWithCitations()
+                    } else {
+                        message.text
+                    }
+                    copyText.takeIf(String::isNotBlank)
+                },
             showBranchSelector = !selectionMode && presentation?.showBranchSelector == true,
             branchIndex = presentation?.branchIndex ?: 0,
             totalBranches = presentation?.totalBranches ?: 1,

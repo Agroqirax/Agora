@@ -74,8 +74,6 @@ class ConversationRuntimeTrace(
         is ConversationCommand.ToolBatchRequested -> identity.runIdentity()
         is ConversationCommand.ToolBatchCompleted -> identity.runIdentity()
         is ConversationCommand.ToolRoundCommitted -> identity.runIdentity()
-        is ConversationCommand.CompactRequested -> identity.runIdentity()
-        is ConversationCommand.CompactCompleted -> identity.runIdentity()
         is ConversationCommand.FinalizationRequested -> identity.runIdentity()
         is ConversationCommand.FinalizationCompleted -> identity.runIdentity()
         is ConversationCommand.StopRequested -> identity
@@ -95,8 +93,6 @@ class ConversationRuntimeTrace(
         is ConversationCommand.ToolBatchRequested -> identity.effectId
         is ConversationCommand.ToolBatchCompleted -> identity.effectId
         is ConversationCommand.ToolRoundCommitted -> identity.effectId
-        is ConversationCommand.CompactRequested -> identity.effectId
-        is ConversationCommand.CompactCompleted -> identity.effectId
         is ConversationCommand.FinalizationRequested -> identity.effectId
         is ConversationCommand.FinalizationCompleted -> identity.effectId
         is ConversationCommand.StopRequested -> effectId
@@ -119,7 +115,6 @@ class ConversationRuntimeTrace(
             is RunToolPhase.Executing -> "ExecutingTools"
             is RunToolPhase.Committing -> "CommittingToolRound"
         }
-        is RunState.Compacting -> "Compacting"
         is RunState.Finalizing -> "Finalizing"
         is RunState.Stopping -> "Stopping"
     }
@@ -138,8 +133,6 @@ class ConversationRuntimeTrace(
         is ConversationCommand.ToolBatchRequested -> "ToolBatchRequested"
         is ConversationCommand.ToolBatchCompleted -> "ToolBatchCompleted"
         is ConversationCommand.ToolRoundCommitted -> "ToolRoundCommitted"
-        is ConversationCommand.CompactRequested -> "CompactRequested"
-        is ConversationCommand.CompactCompleted -> "CompactCompleted"
         is ConversationCommand.FinalizationRequested -> "FinalizationRequested"
         is ConversationCommand.FinalizationCompleted -> "FinalizationCompleted"
         is ConversationCommand.StopRequested -> "StopRequested"
@@ -165,8 +158,6 @@ class ConversationRuntimeTrace(
         is RunEffect.CommitToolRound -> "CommitToolRound"
         is RunEffect.ContinueProviderPass -> "ContinueProviderPass"
         is RunEffect.ToolRoundCommitFailed -> "ToolRoundCommitFailed"
-        is RunEffect.RunCompact -> "RunCompact"
-        is RunEffect.CompactFailed -> "CompactFailed"
         is RunEffect.FinalizeRun -> "FinalizeRun"
         is RunEffect.RunFinalizationFailed -> "RunFinalizationFailed"
         is RunEffect.ReleaseSlot -> "ReleaseSlot"

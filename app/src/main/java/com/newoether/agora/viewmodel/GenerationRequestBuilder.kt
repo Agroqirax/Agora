@@ -6,7 +6,8 @@ import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.PredefinedVariables
 import com.newoether.agora.data.SystemPromptEntry
-import com.newoether.agora.data.isOpenAiProtocolProvider
+import com.newoether.agora.data.providerDisplayName
+import com.newoether.agora.data.isResponsesApiEnabledForProvider
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
@@ -45,7 +46,16 @@ class GenerationRequestBuilder(
         val providerName = providerRegistry.providerForModel(modelId)
         val activeKey = settings.resolveActiveKey(providerName) ?: ""
         if (!providerRegistry.isConfigured(providerName, activeKey)) {
-            onSnackbar(appContext.getString(R.string.no_api_key_for_provider, providerName))
+            val displayProviderName = providerDisplayName(
+                providerName,
+                settings.customProviders.value,
+            )
+            onSnackbar(
+                appContext.getString(
+                    R.string.no_api_key_for_provider,
+                    displayProviderName,
+                )
+            )
             return null
         }
         return ProviderKey(providerName, activeKey)
@@ -104,6 +114,7 @@ class GenerationRequestBuilder(
             presencePenalty = overrides.presencePenalty ?: settings.defaultPresencePenalty.value,
             codeExecutionEnabled = overrides.codeExecutionEnabled ?: settings.codeExecutionEnabled.value,
             googleSearchEnabled = overrides.googleSearchEnabled ?: settings.googleSearchEnabled.value,
+            openAiWebSearchEnabled = overrides.openAiWebSearchEnabled ?: true,
             thinkingEnabled = overrides.thinkingEnabled ?: settings.thinkingEnabled.value,
             thinkingLevel = overrides.thinkingLevel ?: settings.thinkingLevel.value,
             thinkingBudgetEnabled = overrides.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
@@ -160,8 +171,19 @@ class GenerationRequestBuilder(
         } else {
             settings.resolveActiveKey(compactProviderName).orEmpty()
         }
+        val (compactGenerationConfig, compactGenerationContext) = buildGenerationPair(
+            providerName = compactProviderName,
+            modelId = compactModel,
+            activeKey = compactKey,
+            resolvedSystemPrompt = settings.contextCompactPrompt.value,
+            resolvedUserPrepend = null,
+            resolvedUserPostpend = null,
+            effectiveSettings = effectiveSettings,
+            currentId = conversationId,
+        )
         val automaticCompact = AutomaticCompactConfig(
             enabled = settings.contextCompactEnabled.value,
+            thresholdPercent = settings.contextCompactThresholdPercent.value,
             request = CompactRequest(
                 model = compactModel,
                 prompt = settings.contextCompactPrompt.value,
@@ -170,9 +192,16 @@ class GenerationRequestBuilder(
             providerName = compactProviderName,
             apiKey = compactKey,
             baseUrl = providerRegistry.getEffectiveBaseUrl(compactProviderName),
+            responsesApiEnabled = isResponsesApiEnabledForProvider(
+                providerName = compactProviderName,
+                builtInOpenAiEnabled = settings.openAiResponsesApiEnabled.value,
+                customProviders = settings.customProviders.value,
+            ),
             provider = providerInstances[compactProviderName],
             configured = providerRegistry.isConfigured(compactProviderName, compactKey),
-            generationContext = context.copy(
+            generationConfig = compactGenerationConfig,
+            providerInstances = providerInstances,
+            generationContext = compactGenerationContext.copy(
                 webSearchApiKeys = context.webSearchApiKeys.toMap(),
                 shellDevices = context.shellDevices.toList(),
             ),
@@ -260,6 +289,11 @@ class GenerationRequestBuilder(
     ): Pair<GenerationConfig, GenerationContext> {
         val imageGenModel = settings.imageGenModel.value
         val transcriptionModel = settings.imageTranscriptionModel.value
+        val responsesApiEnabled = isResponsesApiEnabledForProvider(
+            providerName = providerName,
+            builtInOpenAiEnabled = settings.openAiResponsesApiEnabled.value,
+            customProviders = settings.customProviders.value,
+        )
         val config = GenerationConfig(
             providerName = providerName,
             modelId = ModelId.parse(providerRegistry.canonicalModelId(modelId)).modelName,
@@ -275,10 +309,13 @@ class GenerationRequestBuilder(
             thinkingBudgetEnabled = effectiveSettings.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
             thinkingBudgetTokens = effectiveSettings.thinkingBudgetTokens ?: settings.thinkingBudgetTokens.value,
             openAiServiceTier = OpenAiServiceTiers.requestValue(
-                enabled = effectiveSettings.openAiServiceTierEnabled == true &&
-                    isOpenAiProtocolProvider(providerName, settings.customProviders.value),
+                enabled = effectiveSettings.openAiServiceTierEnabled == true,
                 value = effectiveSettings.openAiServiceTier,
+                responsesApiEnabled = responsesApiEnabled,
             ),
+            responsesApiEnabled = responsesApiEnabled,
+            openAiWebSearchEnabled =
+                effectiveSettings.openAiWebSearchEnabled == true && responsesApiEnabled,
             baseUrl = providerRegistry.getEffectiveBaseUrl(providerName),
             userPrepend = resolvedUserPrepend,
             userPostpend = resolvedUserPostpend,

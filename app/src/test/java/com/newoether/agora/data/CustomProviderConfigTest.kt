@@ -17,6 +17,53 @@ class CustomProviderConfigTest {
         assertEquals(CustomEndpointProtocol.OPENAI, config.protocol)
         assertEquals("", config.id)
         assertEquals(emptySet<String>(), config.legacyNames)
+        assertEquals(false, config.responsesApiEnabled)
+    }
+
+    @Test
+    fun responsesApiSettingRoundTripsWithStableProviderIdentity() {
+        val original = CustomProviderConfig(
+            name = "Relay X",
+            id = "custom-provider-00000000-0000-4000-8000-000000000001",
+            responsesApiEnabled = true,
+        )
+
+        assertEquals(
+            original,
+            json.decodeFromString<CustomProviderConfig>(json.encodeToString(original)),
+        )
+    }
+
+    @Test
+    fun responsesApiRuntimeGateRequiresBuiltInOrCustomOpenAiProtocol() {
+        val providers = listOf(
+            CustomProviderConfig(
+                name = "OpenAI relay",
+                protocol = CustomEndpointProtocol.OPENAI,
+                responsesApiEnabled = true,
+            ),
+            CustomProviderConfig(
+                name = "Google relay",
+                protocol = CustomEndpointProtocol.GOOGLE,
+                responsesApiEnabled = true,
+            ),
+            CustomProviderConfig(
+                name = "Unknown relay",
+                protocol = CustomEndpointProtocol.UNKNOWN,
+                responsesApiEnabled = true,
+            ),
+        )
+
+        assertEquals(true, isResponsesApiEnabledForProvider("OpenAI", true, providers))
+        assertEquals(false, isResponsesApiEnabledForProvider("OpenAI", false, providers))
+        assertEquals(true, isResponsesApiEnabledForProvider("OpenAI relay", false, providers))
+        assertEquals(
+            true,
+            isResponsesApiEnabledForProvider(providers[0].providerId, false, providers),
+        )
+        assertEquals(false, isResponsesApiEnabledForProvider("Google relay", true, providers))
+        assertEquals(false, isResponsesApiEnabledForProvider("Unknown relay", true, providers))
+        assertEquals(false, isResponsesApiEnabledForProvider("missing", true, providers))
     }
 
     @Test

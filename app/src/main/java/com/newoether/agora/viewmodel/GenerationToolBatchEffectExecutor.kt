@@ -1,11 +1,15 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.api.StreamEvent
+import com.newoether.agora.model.CitationPolicy
+import com.newoether.agora.model.CitationRecord
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.model.ToolExecutionStates
+import com.newoether.agora.model.toCitationRecord
+import com.newoether.agora.model.toMessageSegment
 import com.newoether.agora.tool.ToolExecutionEvent
 import com.newoether.agora.tool.ToolExecutionResult
 import com.newoether.agora.util.Constants
@@ -17,26 +21,60 @@ internal class GenerationToolOverlay(
     private val providerName: String,
 ) {
     private val segments = mutableListOf(MessageSegment(type = "answer"))
+    private val citations = mutableListOf<CitationRecord>()
     private val streamIndices = mutableMapOf<String, Int>()
 
     val size: Int
         get() = segments.size
 
-    fun snapshot(): List<MessageSegment> = segments.toList()
+    fun snapshot(): List<MessageSegment> =
+        segments.toList() + citations.map { it.toMessageSegment() }
+
+    fun contentSnapshot(): List<MessageSegment> = segments.toList()
 
     fun replaceAll(replacement: List<MessageSegment>) {
         segments.clear()
-        segments.addAll(replacement)
+        citations.clear()
+        replacement.forEach { segment ->
+            if (segment.type == "citation") {
+                segment.toCitationRecord()?.let(::upsertCitation)
+            } else {
+                segments += segment
+            }
+        }
         streamIndices.clear()
     }
 
     fun prependAll(prefix: List<MessageSegment>) {
         if (prefix.isEmpty()) return
-        segments.addAll(0, prefix)
-        streamIndices.entries.forEach { entry -> entry.setValue(entry.value + prefix.size) }
+        val contentPrefix = prefix.filter { it.type != "citation" }
+        prefix.mapNotNull { it.toCitationRecord() }.forEach(::upsertCitation)
+        if (contentPrefix.isEmpty()) return
+        segments.addAll(0, contentPrefix)
+        streamIndices.entries.forEach { entry -> entry.setValue(entry.value + contentPrefix.size) }
     }
 
-    fun append(segment: MessageSegment) = appendMergedSegment(segments, segment)
+    fun append(segment: MessageSegment) {
+        if (segment.type == "citation") {
+            segment.toCitationRecord()?.let(::upsertCitation)
+        } else {
+            appendMergedSegment(segments, segment)
+        }
+    }
+
+    fun upsertCitation(raw: CitationRecord): Boolean {
+        val citation = CitationPolicy.normalize(raw) ?: return false
+        val index = citations.indexOfFirst { it.sourceId == citation.sourceId }
+        if (index < 0) {
+            if (citations.size >= CitationPolicy.MAX_SOURCES) return false
+            citations += citation
+            return true
+        }
+        val merged = CitationPolicy.merge(citations[index], citation)
+        val changed = merged != citations[index]
+        citations[index] = merged
+        return changed
+    }
 
     fun hasStream(streamKey: String): Boolean = streamKey in streamIndices
 
@@ -85,6 +123,27 @@ internal class GenerationToolOverlay(
         return true
     }
 
+    fun upsertHosted(event: StreamEvent.HostedToolCallUpdate): Boolean {
+        val created = upsert(
+            streamKey = event.streamKey,
+            toolCallId = event.streamKey,
+            name = event.name,
+            arguments = event.arguments,
+            signature = null,
+        )
+        val index = checkNotNull(streamIndices[event.streamKey])
+        val current = segments[index]
+        segments[index] = current.copy(
+            toolResult = event.result,
+            toolState = when {
+                event.result == null -> ToolExecutionStates.RUNNING
+                event.isError -> ToolExecutionStates.FAILED
+                else -> ToolExecutionStates.SUCCEEDED
+            },
+        )
+        return created
+    }
+
     fun start(call: StreamEvent.ToolCallRequest) {
         val index = checkNotNull(streamIndices[call.streamKey]) {
             "Missing live segment for tool call ${call.streamKey}"
@@ -97,6 +156,10 @@ internal class GenerationToolOverlay(
             toolCallId = call.id,
             signature = call.signature,
             signatureProvider = providerName.takeIf { call.signature != null },
+            responseOutputItems = call.responseOutputItems,
+            responseOutputItemProvider = providerName.takeIf {
+                call.responseOutputItems.isNotEmpty()
+            },
             toolState = ToolExecutionStates.RUNNING,
             toolTarget = metadata?.target ?: current.toolTarget,
             toolDisplayName = metadata?.displayName ?: current.toolDisplayName,
@@ -111,6 +174,13 @@ internal class GenerationToolOverlay(
             is ToolExecutionEvent.OutputDelta -> current.copy(
                 toolState = ToolExecutionStates.RUNNING,
                 toolProgress = appendBoundedToolOutput(current.toolProgress, event.text),
+            )
+            is ToolExecutionEvent.OutputSnapshot -> current.copy(
+                toolState = ToolExecutionStates.RUNNING,
+                toolProgress = takeLastWholeCodePoints(
+                    event.text,
+                    Constants.MAX_TOOL_RESULT_LENGTH,
+                ),
             )
             is ToolExecutionEvent.TargetResolved -> current.copy(toolTarget = event.target)
             is ToolExecutionEvent.Progress -> current.copy(toolState = ToolExecutionStates.RUNNING)
@@ -145,6 +215,8 @@ internal class GenerationToolOverlay(
                 displayName = completed.toolDisplayName,
                 resultText = displayText,
                 structuredResult = structuredResult,
+                responseOutputItems = completed.responseOutputItems,
+                responseOutputItemProvider = completed.responseOutputItemProvider,
             ),
         )
     }
@@ -168,6 +240,15 @@ internal class GenerationToolOverlay(
     }
 }
 
+internal fun takeLastWholeCodePoints(text: String, maxChars: Int): String {
+    if (text.length <= maxChars) return text
+    var start = text.length - maxChars
+    if (start > 0 && Character.isLowSurrogate(text[start]) && Character.isHighSurrogate(text[start - 1])) {
+        start++
+    }
+    return text.substring(start)
+}
+
 internal data class CompletedToolCall(
     val segment: MessageSegment,
     val data: ToolCallData,
@@ -178,6 +259,7 @@ internal data class AuthorizedToolBatchRequest(
     val calls: List<StreamEvent.ToolCallRequest>,
     val context: GenerationContext,
     val conversationId: String,
+    val authorizedToolNames: Set<String>,
 ) {
     init {
         require(calls.isNotEmpty())
@@ -223,6 +305,7 @@ internal class GenerationToolBatchEffectExecutor(
                     name = call.name,
                     arguments = call.arguments,
                     context = request.context,
+                    authorizedToolNames = request.authorizedToolNames,
                 ),
             ) { event ->
                 if (event !is ToolExecutionEvent.Completed) {

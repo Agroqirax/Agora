@@ -65,6 +65,10 @@ internal sealed interface AutomationSendOutcome {
     data class Delivered(val modelMessageId: String) : AutomationSendOutcome
 }
 
+/** Only durable Compact success may release any automatic queue or loop handoff. */
+internal fun automaticCompactAllowsHandoff(status: MessageStatus?): Boolean =
+    status == MessageStatus.SUCCESS
+
 /** Dictates whether a send scrolls unconditionally or only while the user is at the bottom. */
 internal enum class SendScrollPolicy {
     /** Always request absolute-bottom scroll (manual send, queue drain). */
@@ -141,25 +145,7 @@ internal class MessageGenerationController(
     private val pauseConversationTasks: suspend (String) -> Unit = {},
 ) {
     private val titleGenerator = ConversationTitleGenerator(convRepo, settings, providerRegistry)
-    private val compactController = ConversationCompactController(
-        conversations = convRepo,
-        operation = ContextCompactor(
-            conversations = convRepo,
-            settings = settings,
-            providers = providerRegistry,
-            pauseLoop = pauseConversationTasks,
-        ),
-        projectGraph = { conversationId, all, selected ->
-            ifOpenOn(conversationId) {
-                renderStore.replaceGraph(
-                    allMessages = all.map { it.toUiChatMessage(appContext) },
-                    selectedChildren = selected,
-                )
-            }
-        },
-        onCompactStarted = onScrollToAttachedBottomAfter,
-    )
-    private val acceptanceNotifier = SendAcceptanceNotifier(onSendAcceptedEvent)
+    private val contextCompactor = ContextCompactor(conversations = convRepo)
     private val terminalSettlement = GenerationTerminalSettlementController(
         conversations = convRepo,
         stopFinalizer = GenerationFinalizer(convRepo) { _, _ -> },
@@ -171,7 +157,7 @@ internal class MessageGenerationController(
     private val boundRunGenerationLauncher = BoundRunGenerationLauncher(
         conversations = convRepo,
         generationManagerProvider = generationManagerProvider,
-        compactController = compactController,
+        automaticCompactNeeded = contextCompactor::automaticNeeded,
         terminalSettlement = terminalSettlement,
         toUiMessage = { it.toUiChatMessage(appContext) },
         onAutomaticCompactContinuation = ::scheduleAutomaticCompactContinuation,
@@ -191,6 +177,15 @@ internal class MessageGenerationController(
             )
         },
     )
+    private val compactController = ConversationCompactController(
+        conversations = convRepo,
+        operation = contextCompactor,
+        requestBuilder = requestBuilder,
+        generationManagerProvider = generationManagerProvider,
+        continuationLauncher = { standardContinuationLauncher },
+        onCompactStarted = onScrollToAttachedBottomAfter,
+    )
+    private val acceptanceNotifier = SendAcceptanceNotifier(onSendAcceptedEvent)
     private val directAcceptedInputExecutor = DirectAcceptedInputEffectExecutor(
         conversations = convRepo,
         settings = settings,
@@ -305,7 +300,7 @@ internal class MessageGenerationController(
 
     suspend fun compactManual(request: CompactRequest): CompactResult {
         val conversationId = currentConversationId.value
-            ?: return CompactResult.Failed("Open a conversation first")
+            ?: return CompactResult.Failed(CompactFailureReason.OPEN_CONVERSATION)
         return compactController.manual(
             conversationId = conversationId,
             request = request,
@@ -441,12 +436,22 @@ internal class MessageGenerationController(
                 // The Compact row is durable and visible before this returns. sendInto then sees
                 // the same occupied generation slot and accepts this input through the ordinary
                 // FIFO guidance queue instead of waiting in a Compact-specific preflight state.
-                compactController.startAutomaticBeforeSend(
-                    conversationId = genId,
-                    contextLimit = snapshot.config.maxContextWindow,
-                    config = snapshot.automaticCompact.copy(fixedTokenCost = fixedTokenCost),
-                    state = state,
-                )
+                when (
+                    val compact = compactController.startAutomaticBeforeSend(
+                        conversationId = genId,
+                        contextLimit = snapshot.config.maxContextWindow,
+                        config = snapshot.automaticCompact.copy(fixedTokenCost = fixedTokenCost),
+                        state = state,
+                    )
+                ) {
+                    is CompactResult.Failed -> {
+                        onSnackbar(compactFailureMessage(appContext, compact))
+                        return null
+                    }
+                    is CompactResult.Stopped -> return null
+                    CompactResult.NotNeeded,
+                    is CompactResult.Created -> Unit
+                }
             }
         }
         val newConversation = if (wasNewChat) {
@@ -474,9 +479,6 @@ internal class MessageGenerationController(
     internal suspend fun drainQueuedAfterGeneration(state: ConversationGenerationState) {
         queuedGuidanceDrainExecutor.drainAfterSettlement(state)
     }
-
-    internal suspend fun drainQueuedAfterStop(state: ConversationGenerationState) =
-        drainQueuedAfterGeneration(state)
 
     /**
      * Core send into a KNOWN conversation [genId] (never re-reads currentConversationId, so a
@@ -735,28 +737,30 @@ internal class MessageGenerationController(
                 contextLimit = request.generationRequest.snapshot.config.maxContextWindow,
                 config = request.config,
                 state = state,
-            )
-            compactLaunch?.job?.join()
-            val compactMessageId = compactLaunch?.messageId
-            if (compactMessageId != null) {
-                val compactStatus = convRepo
-                    .getMessagesForConversationSnapshot(request.generationRequest.conversationId)
-                    .find { it.id == compactMessageId }
-                    ?.status
-                if (compactStatus == null || compactStatus == MessageStatus.STOPPED) return@launch
-            }
+            ) ?: return@launch
+            compactLaunch.job.join()
+            val compactMessageId = compactLaunch.messageId
+            val compactStatus = convRepo
+                .getMessagesForConversationSnapshot(request.generationRequest.conversationId)
+                .find { it.id == compactMessageId }
+                ?.status
+            if (!automaticCompactAllowsHandoff(compactStatus)) return@launch
 
-            // User guidance queued during the preceding Assistant or Compact is itself the next
-            // standard generation and supersedes an automatic no-input continuation.
-            if (state.hasPendingOrClaimedGuidanceSince(guidanceClaimRevision)) return@launch
-            standardContinuationLauncher.launch(
-                request = StandardGenerationContinuationRequest(
-                    conversationId = request.generationRequest.conversationId,
-                    parentMessageId = compactMessageId ?: request.parentMessageId,
-                    snapshot = request.generationRequest.snapshot,
-                ),
+            // Queue inspection and no-input continuation admission share the queue mutex, so
+            // guidance arriving at Compact settlement cannot lose the Queue-before-Loop race.
+            launchStandardContinuationAfterGuidance(
                 state = state,
-            )
+                guidanceClaimRevision = guidanceClaimRevision,
+            ) {
+                standardContinuationLauncher.launch(
+                    request = StandardGenerationContinuationRequest(
+                        conversationId = request.generationRequest.conversationId,
+                        parentMessageId = compactMessageId,
+                        snapshot = request.generationRequest.snapshot,
+                    ),
+                    state = state,
+                )
+            }
         }
     }
 

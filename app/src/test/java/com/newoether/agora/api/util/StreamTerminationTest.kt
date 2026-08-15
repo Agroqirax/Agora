@@ -1,6 +1,8 @@
 package com.newoether.agora.api.util
 
 import com.newoether.agora.api.GenerationError
+import com.newoether.agora.api.StreamEvent
+import com.newoether.agora.model.CitationRecord
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -8,6 +10,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StreamTerminationTest {
+    @Test
+    fun citationUpdates_doNotCountAsModelOutput() {
+        val event = StreamEvent.CitationUpdate(
+            CitationRecord(
+                sourceId = "citation_source",
+                provider = "test",
+                kind = "url",
+                title = "Source",
+            ),
+        )
+
+        assertFalse(event.carriesModelOutput())
+    }
 
     private fun termination(
         sawTerminalMarker: Boolean = true,

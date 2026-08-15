@@ -19,6 +19,8 @@ import com.newoether.agora.data.DataExporter
 import com.newoether.agora.data.DataImporter
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.PredefinedVariables
+import com.newoether.agora.data.forDisplay
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 
 import com.newoether.agora.data.ShellDeviceConfig
 
@@ -29,6 +31,7 @@ import com.newoether.agora.model.AttachmentItem
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.isContextCompact
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.sandbox.SandboxManager
@@ -245,6 +248,7 @@ class ChatViewModel(
             context = appContext,
             sandboxFactory = sandboxFactory,
             additionalToolProviders = listOf(automationToolProvider, mcpToolProvider),
+            customProviders = { settings.customProviders.value },
         ).also { gm ->
             // Gate lives in RagManager.indexMessageForRag (autoCacheEnabled + active model).
             gm.onMessagePersisted = { messageId, text -> ragManager.indexMessageForRag(messageId, text) }
@@ -466,7 +470,11 @@ class ChatViewModel(
         extraBufferCapacity = 1,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
-    val snackbarMessage = _snackbarMessage.asSharedFlow()
+    val snackbarMessage = _snackbarMessage
+        .map { it.forDisplay(settings.customProviders.value) }
+    fun displayText(text: String): String =
+        replaceCustomProviderIdsForDisplay(text, settings.customProviders.value)
+
     fun emitSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
         viewModelScope.launch { _snackbarMessage.emit(SnackbarEvent(message, actionLabel, onAction)) }
     }
@@ -475,7 +483,8 @@ class ChatViewModel(
         extraBufferCapacity = 1,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
-    val conversationShareText = _conversationShareText.asSharedFlow()
+    val conversationShareText = _conversationShareText
+        .map { replaceCustomProviderIdsForDisplay(it, settings.customProviders.value) }
 
     private val _firstMessageCommitted = MutableSharedFlow<String>(
         replay = 0,
@@ -544,13 +553,6 @@ class ChatViewModel(
                     generationController.drainQueuedAfterGeneration(settledState)
                 }
             }
-            state.onStopSettled = { settledState ->
-                // After a Stop cleanly settles (STOPPED row persisted, slot released), drain
-                // any queued sends into a fresh Run so accepted interventions are never dropped.
-                settledState.scope.launch {
-                    generationController.drainQueuedAfterStop(settledState)
-                }
-            }
         }
     }
 
@@ -612,13 +614,17 @@ class ChatViewModel(
     val isCompacting: StateFlow<Boolean> = currentConversationId
         .flatMapLatest { conversationId ->
             if (conversationId == null) flowOf(false)
-            else generationRegistry.getOrCreate(conversationId).compacting
+            else generationRegistry.getOrCreate(conversationId).streamingMessage
+                .map { message -> message?.isContextCompact() == true }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val compactPreview: StateFlow<String> = currentConversationId
         .flatMapLatest { conversationId ->
             if (conversationId == null) flowOf("")
-            else generationRegistry.getOrCreate(conversationId).compactPreview
+            else generationRegistry.getOrCreate(conversationId).streamingMessage
+                .map { message ->
+                    message?.takeIf(ChatMessage::isContextCompact)?.text.orEmpty()
+                }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val pendingConversationSettings: StateFlow<ConversationSettings?> = _pendingConversationSettings.asStateFlow()
@@ -731,8 +737,7 @@ class ChatViewModel(
 
     fun updateConversationSetting(convId: String?, update: (ConversationSettings) -> ConversationSettings) {
         if (convId != null) {
-            val current = settings.conversationSettings.value[convId] ?: ConversationSettings()
-            settings.setConversationSettings(convId, update(current))
+            settings.updateConversationSettings(convId, update)
         } else {
             val current = _pendingConversationSettings.value ?: ConversationSettings()
             _pendingConversationSettings.value = update(current)
@@ -882,9 +887,9 @@ class ChatViewModel(
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                CompactResult.Failed("Context compact failed")
+                CompactResult.Failed(CompactFailureReason.GENERIC)
             }
-            if (result is CompactResult.Failed) emitSnackbar(result.message)
+            if (result is CompactResult.Failed) emitSnackbar(compactFailureMessage(appContext, result))
         }
     }
 
@@ -905,9 +910,9 @@ class ChatViewModel(
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                CompactResult.Failed("Context compact failed")
+                CompactResult.Failed(CompactFailureReason.GENERIC)
             }
-            if (result is CompactResult.Failed) emitSnackbar(result.message)
+            if (result is CompactResult.Failed) emitSnackbar(compactFailureMessage(appContext, result))
         }
     }
 
