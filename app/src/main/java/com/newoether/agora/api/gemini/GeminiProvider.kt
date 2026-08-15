@@ -673,6 +673,8 @@ class GeminiProvider(
                         val pendingCodeExecutions = java.util.ArrayDeque<Pair<String, String>>()
                         val googleSearchStreamKey = "gemini_google_search_${UUID.randomUUID()}"
                         var lastGroundingMetadata: String? = null
+                        var latestGroundingMetadata: JsonObject? = null
+                        val answerText = StringBuilder()
 
                         suspend fun emitTracked(event: StreamEvent) {
                             if (event.carriesModelOutput()) producedContent = true
@@ -716,6 +718,7 @@ class GeminiProvider(
                                     finishReason = normalizeGeminiFinishReason(it)
                                 }
                                 candidate?.groundingMetadata?.let { metadata ->
+                                    latestGroundingMetadata = metadata
                                     val snapshot = metadata.toString()
                                     if (snapshot != lastGroundingMetadata) {
                                         lastGroundingMetadata = snapshot
@@ -754,7 +757,10 @@ class GeminiProvider(
                                         if (isPartOfThought || inThoughtBlock) {
                                             emitTracked(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it), currentThoughtSignature))
                                             inThoughtBlock = false
-                                        } else emitTracked(StreamEvent.TextChunk(it))
+                                        } else {
+                                            answerText.append(it)
+                                            emitTracked(StreamEvent.TextChunk(it))
+                                        }
                                     }
                                     part.executableCode?.let { code ->
                                         val active = code.toCodeExecutionStart(
@@ -801,6 +807,9 @@ class GeminiProvider(
                                         }
                                     }
                                 }
+                                candidate?.groundingMetadata
+                                    ?.toGeminiCitations(answerText.toString())
+                                    ?.forEach { citation -> emit(StreamEvent.CitationUpdate(citation)) }
                                 response.usageMetadata?.let { emit(StreamEvent.UsageUpdate(it.toTokenUsage())) }
                                 if (streamError != null || finishReason != null) break
                             } catch (e: Exception) {
@@ -824,6 +833,11 @@ class GeminiProvider(
                             timedOut,
                             toolCallInFlight || pendingCodeExecutions.isNotEmpty(),
                         )
+                        if (!(termination.isRetryable && attempt < maxAttempts)) {
+                            latestGroundingMetadata
+                                ?.toGeminiCitations(answerText.toString())
+                                ?.forEach { citation -> emit(StreamEvent.CitationUpdate(citation)) }
+                        }
                         DebugLog.d("AgoraSSE", "[$name] ${termination.describe()}")
                         if (termination.isRetryable && attempt < maxAttempts) {
                             emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))

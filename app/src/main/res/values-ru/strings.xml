@@ -152,6 +152,10 @@
     <string name="import_invalid_gguf_title">Недопустимый файл GGUF</string>
     <string name="import_invalid_gguf_desc">Выбранный файл не является допустимой моделью GGUF.</string>
     <string name="ok">ОК</string>
+    <string name="citation_sources">Источники</string>
+    <string name="citation_source_accessibility">Источник %1$d: %2$s</string>
+    <string name="citation_source_file">Файл</string>
+    <string name="citation_source_location">Расположение</string>
     <string name="generation_retry_attempt">Повтор %1$d/%2$d</string>
     <string name="action">Действие</string>
     <string name="video">Видео</string>

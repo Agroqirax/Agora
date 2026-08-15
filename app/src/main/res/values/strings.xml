@@ -186,6 +186,10 @@
     <string name="import_invalid_gguf_title">Invalid GGUF File</string>
     <string name="import_invalid_gguf_desc">The selected file is not a valid GGUF model.</string>
     <string name="ok">OK</string>
+    <string name="citation_sources">Sources</string>
+    <string name="citation_source_accessibility">Source %1$d: %2$s</string>
+    <string name="citation_source_file">File</string>
+    <string name="citation_source_location">Location</string>
     <string name="generation_retry_attempt">Retry %1$d/%2$d</string>
     <string name="action">Action</string>
     <string name="video">Video</string>

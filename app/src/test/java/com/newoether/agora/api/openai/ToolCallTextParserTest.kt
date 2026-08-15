@@ -214,52 +214,115 @@ class ToolCallTextParserTest {
     }
 
     @Test
-    fun responsesUrlCitationsArePresentedOnceAsSafeMarkdownLinks() {
+    fun responsesUrlCitationsEmitStructuredAnchoredMetadataOnce() {
         val router = responsesRouter()
+        router.route(
+            responseEvent("response.output_text.delta", 1, delta = "Grounded claim"),
+        )
         val citation = OpenAiResponseAnnotation(
             type = "url_citation",
-            title = "Source [one]",
-            url = "https://example.com/a)b",
+            title = "Source one",
+            url = "https://Example.com:443/a)b",
+            startIndex = 0,
+            endIndex = 8,
         )
         val first = router.route(
-            responseEvent("response.output_text.annotation.added", 1).copy(annotation = citation),
-        ).filterIsInstance<StreamEvent.TextChunk>().single().text
-        assertEquals("\n\n[Source \\[one\\]](https://example.com/a%29b)", first)
+            responseEvent("response.output_text.annotation.added", 2).copy(annotation = citation),
+        ).filterIsInstance<StreamEvent.CitationUpdate>().single().citation
+        assertEquals("Source one", first.title)
+        assertEquals("https://example.com/a)b", first.url)
+        assertEquals("Grounded", first.anchors.single().citedText)
         assertTrue(
             router.route(
-                responseEvent("response.output_text.annotation.added", 2).copy(annotation = citation),
+                responseEvent("response.output_text.annotation.added", 3).copy(annotation = citation),
             ).isEmpty(),
         )
     }
 
     @Test
-    fun responsesInvalidUrlCitationFailsClosed() {
+    fun responsesCitationOffsetsAreScopedToTheirOutputTextItem() {
+        val router = responsesRouter()
+        router.route(
+            responseEvent(
+                "response.output_text.delta",
+                1,
+                delta = "Earlier output. ",
+                itemId = "message-1",
+                outputIndex = 0,
+                contentIndex = 0,
+            ),
+        )
+        val cited = "([openai.com](https://openai.com/research))"
+        val secondOutput = "Later output $cited"
+        router.route(
+            responseEvent(
+                "response.output_text.delta",
+                2,
+                delta = secondOutput,
+                itemId = "message-1",
+                outputIndex = 0,
+                contentIndex = 1,
+            ),
+        )
+        val localStart = secondOutput.indexOf(cited)
+
+        val citation = router.route(
+            responseEvent(
+                "response.output_text.annotation.added",
+                3,
+                itemId = "message-1",
+                outputIndex = 0,
+                contentIndex = 1,
+            ).copy(
+                annotation = OpenAiResponseAnnotation(
+                    type = "url_citation",
+                    title = "OpenAI Research",
+                    url = "https://openai.com/research",
+                    startIndex = localStart,
+                    endIndex = localStart + cited.length,
+                ),
+            ),
+        ).filterIsInstance<StreamEvent.CitationUpdate>().single().citation
+
+        assertEquals("Earlier output. ".length + localStart, citation.anchors.single().startIndex)
+        assertEquals(cited, citation.anchors.single().citedText)
+    }
+
+    @Test
+    fun responsesInvalidUrlCitationIsDroppedWithoutFailingAnswer() {
         val router = responsesRouter()
         val events = router.route(
             responseEvent("response.output_text.annotation.added", 1).copy(
                 annotation = OpenAiResponseAnnotation(type = "url_citation", url = "javascript:alert(1)"),
             ),
         )
-        assertTrue(events.single() is StreamEvent.Error)
-    }
-
-    @Test
-    fun responsesNonUrlAnnotationIsIgnored() {
-        val router = responsesRouter()
-        val events = router.route(
-            responseEvent("response.output_text.annotation.added", 1).copy(
-                annotation = OpenAiResponseAnnotation(type = "file_citation"),
-            ),
-        )
         assertTrue(events.isEmpty())
     }
 
     @Test
-    fun responsesMissingCitationAnnotationFailsClosed() {
+    fun responsesFileCitationEmitsNonUrlSourceMetadata() {
+        val router = responsesRouter()
+        val citation = router.route(
+            responseEvent("response.output_text.annotation.added", 1).copy(
+                annotation = OpenAiResponseAnnotation(
+                    type = "file_citation",
+                    fileId = "file-123",
+                    filename = "report.pdf",
+                ),
+            ),
+        ).filterIsInstance<StreamEvent.CitationUpdate>().single().citation
+        assertEquals("file", citation.kind)
+        assertEquals("report.pdf", citation.title)
+        assertEquals("file-123", citation.providerSourceId)
+        assertTrue(citation.anchors.isEmpty())
+    }
+
+    @Test
+    fun responsesMissingCitationAnnotationIsIgnored() {
         val events = responsesRouter().route(
             responseEvent("response.output_text.annotation.added", 1),
         )
-        assertTrue(events.single() is StreamEvent.Error)
+        assertTrue(events.isEmpty())
     }
 
     @Test
@@ -689,6 +752,7 @@ class ToolCallTextParserTest {
         name: String? = null,
         itemId: String? = null,
         outputIndex: Int? = null,
+        contentIndex: Int? = null,
         summaryIndex: Int? = null,
         item: OpenAiResponseOutputItem? = null,
         response: OpenAiResponseEnvelope? = null,
@@ -700,6 +764,7 @@ class ToolCallTextParserTest {
         name = name,
         itemId = itemId,
         outputIndex = outputIndex,
+        contentIndex = contentIndex,
         summaryIndex = summaryIndex,
         sequenceNumber = sequence,
         item = item?.let {

@@ -298,19 +298,32 @@ index inserts exactly one blank line between summary parts. Bold text or a Markd
 current summary part supplies the thinking-card title with its marker removed, matching Gemini.
 Disabling thinking suppresses both the summary request and its presentation.
 
-Provider-hosted tools use display-only stream events. They may create and settle ordinary tool
-segments, but they cannot authorize local execution, enter the tool-effect reducer, or fabricate a
-tool-result continuation round. Provider semantic termination still owns whether the request
-succeeded; Stop and errors use the shared generation settlement.
-A message card with tool segments but no real `thought` segment displays only `Called x tools`.
-Message-level thought duration is a fallback only when at least one thought segment exists; it must
-not turn a tool-only card into `Thought for xs, called x tools`.
-Gemini keeps its hosted output protocol-local. Candidate `groundingMetadata` becomes a completed
-`google_search` hosted block displayed as `Google Search`, with normalized `results` for the shared
-search presentation and the full grounding metadata retained in the durable result. An
-`executableCode` part starts a `code_execution` block displayed as `Code Execution`; the matching
-`codeExecutionResult` completes that same block. Code and output are not duplicated into answer
-text. Persisted Code Execution segments replay to later Gemini requests as typed executable-code and
+Provider-hosted tools use non-executing hosted-tool stream events. They may create and settle durable
+ordinary tool segments, but they cannot authorize local execution, enter the tool-effect reducer, or
+fabricate a tool-result continuation round. Whether a durable hosted segment is presented is an
+independent UI policy. Provider semantic termination still owns whether the request succeeded; Stop
+and errors use the shared generation settlement.
+
+Structured Provider citations follow [citations.md](citations.md). Protocol routers emit structured
+citation events rather than answer `TextChunk` or tool events. The existing streaming segment
+overlay and bounded checkpoint/terminal persistence retain accepted citation segments for the
+identified Run, while Provider history and token/context projection exclude them. Citations do not
+create a second generation lifecycle, change semantic termination, or append synthetic source text
+to the durable answer.
+
+A message card with visible tool segments but no real `thought` segment displays only
+`Called x tools`. Message-level thought duration is a fallback only when at least one thought segment
+exists; it must not turn a tool-only card into `Thought for xs, called x tools`.
+Gemini keeps its hosted output protocol-local. Candidate `groundingMetadata` becomes a completed,
+durable `google_search` hosted block with normalized `results` and full grounding metadata. The shared
+UI segment-preparation boundary excludes that exact tool name from compact, grouped timeline,
+ordinary timeline, and thinking-detail presentation, so it produces neither a `Google Search` card
+nor a `Called x tools` count; generic `web_search`, OpenAI `openai_search`, and other tools remain
+visible. This presentation rule does not change request serialization, hosted-tool settlement,
+persistence, replay, citation extraction, source order, or failure behavior. An `executableCode` part
+starts a visible `code_execution` block displayed as `Code Execution`; the matching
+`codeExecutionResult` completes that same block. Code and output are not duplicated into answer text.
+Persisted Code Execution segments replay to later Gemini requests as typed executable-code and
 code-execution-result model parts in their original order. Multiple pairs remain ordered, and an
 unmatched executable-code part leaves a tool in flight so semantic termination fails closed.
 

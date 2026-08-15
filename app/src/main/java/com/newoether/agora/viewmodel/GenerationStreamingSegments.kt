@@ -1,6 +1,8 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationPolicy
+import com.newoether.agora.model.CitationRecord
 import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
@@ -74,6 +76,27 @@ internal fun appendMergedSegment(
     }
 }
 
+internal fun rebaseCitationForFinalAnswer(
+    citation: CitationRecord,
+    providerAnswerStart: Int,
+    finalAnswer: String,
+): CitationRecord {
+    if (citation.anchors.isEmpty()) return citation
+    val shifted = citation.copy(
+        anchors = citation.anchors.mapNotNull { anchor ->
+            val start = providerAnswerStart.toLong() + anchor.startIndex
+            val end = providerAnswerStart.toLong() + anchor.endIndex
+            if (start !in 0..Int.MAX_VALUE.toLong() || end !in 0..Int.MAX_VALUE.toLong()) {
+                null
+            } else {
+                anchor.copy(startIndex = start.toInt(), endIndex = end.toInt())
+            }
+        },
+    )
+    return CitationPolicy.normalize(shifted, finalAnswer)
+        ?: citation.copy(anchors = emptyList())
+}
+
 private fun mergeDurationMs(first: Long?, second: Long?): Long? {
     val merged = (first ?: 0L) + (second ?: 0L)
     return merged.takeIf { it > 0L }
@@ -88,7 +111,8 @@ internal fun buildLiveSegments(
     thoughtDurationMs: Long? = null,
     errorMessage: String? = null,
 ): List<MessageSegment>? {
-    val result = flushed.toMutableList()
+    val citations = flushed.filter { it.type == "citation" }
+    val result = flushed.filterTo(mutableListOf()) { it.type != "citation" }
     if (answer.isNotEmpty()) {
         appendMergedSegment(result, MessageSegment(type = "answer", content = answer.toString()))
     }
@@ -107,6 +131,7 @@ internal fun buildLiveSegments(
     errorMessage?.takeIf { it.isNotBlank() }?.let { error ->
         result.add(MessageSegment(type = "error", content = error))
     }
+    result.addAll(citations)
     return result.ifEmpty { null }
 }
 

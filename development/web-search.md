@@ -69,17 +69,22 @@ No owner may infer the other capability from a matching company name or legacy s
   Search or Chat Completions, auto-disable the setting, or use a Snackbar-only error path.
 - Every OpenAI Responses `web_search_call` output item must appear in the ordinary message
   timeline as one `OpenAI Search` tool block.
-- Gemini candidate `groundingMetadata` must become one completed `Google Search` hosted-tool block.
-  Its durable result keeps the full grounding metadata and exposes normalized source `results` with
-  titles and URLs for the shared search-card presentation. It must not call `WebSearchToolProvider`
-  or reuse generic search settings.
+- Gemini candidate `groundingMetadata` must become one completed durable `google_search` hosted-tool
+  block. Its result keeps the full grounding metadata and normalized source `results`, but the exact
+  `google_search` segment is excluded at the shared UI presentation boundary: it renders no search
+  card and contributes nothing to `Called x tools`. It must not call `WebSearchToolProvider` or reuse
+  generic search settings. Generic `web_search`, OpenAI `openai_search`, Code Execution, and all other
+  tool segments remain visible.
 - Provider-hosted calls are display-only. They must never become a local `ToolCallRequest`, execute
   through `WebSearchToolProvider`, consume generic provider credentials, or start a tool
   continuation round.
 - The added/done events for one provider call must update the same stable block. Completed and
   failed provider statuses must settle that block terminally; Stop settles an incomplete block as
   stopped through the standard generation lifecycle.
-- Hosted search answer citations remain clickable answer content and do not replace the tool block.
+- Hosted search answer citations follow the complete lifecycle in
+  [citations.md](citations.md): structured Provider metadata is durable answer metadata and renders
+  as numbered answer/source references. Hiding Gemini's `google_search` presentation never removes,
+  replaces, or executes its durable hosted-tool block.
 
 ## 6. Failure and security behavior
 

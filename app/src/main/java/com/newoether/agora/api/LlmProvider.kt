@@ -1,6 +1,7 @@
 package com.newoether.agora.api
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationRecord
 import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.model.TokenUsage
 import kotlinx.coroutines.flow.Flow
@@ -12,6 +13,7 @@ import kotlinx.serialization.json.JsonObject
 
 sealed class StreamEvent {
     data class TextChunk(val text: String) : StreamEvent()
+    data class CitationUpdate(val citation: CitationRecord) : StreamEvent()
     data class ThoughtChunk(val thought: String, val title: String? = null, val signature: String? = null) : StreamEvent()
     data class UsageUpdate(val usage: TokenUsage) : StreamEvent() {
         constructor(tokenCount: Int, thoughtsTokenCount: Int = 0) : this(
@@ -216,6 +218,7 @@ data class OpenAiResponseStreamEvent(
     val name: String? = null,
     @SerialName("item_id") val itemId: String? = null,
     @SerialName("output_index") val outputIndex: Int? = null,
+    @SerialName("content_index") val contentIndex: Int? = null,
     @SerialName("summary_index") val summaryIndex: Int? = null,
     @SerialName("sequence_number") val sequenceNumber: Int? = null,
     val item: JsonObject? = null,
@@ -231,6 +234,10 @@ data class OpenAiResponseAnnotation(
     val url: String? = null,
     @SerialName("start_index") val startIndex: Int? = null,
     @SerialName("end_index") val endIndex: Int? = null,
+    val index: Int? = null,
+    @SerialName("file_id") val fileId: String? = null,
+    val filename: String? = null,
+    @SerialName("container_id") val containerId: String? = null,
 )
 
 @Serializable

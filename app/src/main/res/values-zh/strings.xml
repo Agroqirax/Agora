@@ -171,6 +171,10 @@
     <string name="import_invalid_gguf_title">无效的 GGUF 文件</string>
     <string name="import_invalid_gguf_desc">所选文件不是有效的 GGUF 模型文件。</string>
     <string name="ok">确定</string>
+    <string name="citation_sources">来源</string>
+    <string name="citation_source_accessibility">来源 %1$d：%2$s</string>
+    <string name="citation_source_file">文件</string>
+    <string name="citation_source_location">位置</string>
     <string name="generation_retry_attempt">重试 %1$d/%2$d</string>
 
     <!-- Settings - Main -->

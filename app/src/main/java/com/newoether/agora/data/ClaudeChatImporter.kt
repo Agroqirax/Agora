@@ -2,11 +2,13 @@ package com.newoether.agora.data
 
 import com.newoether.agora.model.AttachmentItem
 import com.newoether.agora.model.AttachmentMeta
+import com.newoether.agora.model.CitationRecord
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromStream
 import java.io.BufferedInputStream
 import java.io.InputStream
@@ -43,13 +45,7 @@ class ClaudeChatImporter {
         val type: String = "",
         val text: String = "",
         val thinking: String = "",
-        val citations: List<ClaudeCitation> = emptyList()
-    )
-
-    @Serializable
-    data class ClaudeCitation(
-        val uuid: String = "",
-        val title: String? = null
+        val citations: List<JsonElement> = emptyList()
     )
 
     @Serializable
@@ -225,11 +221,21 @@ class ClaudeChatImporter {
 
             for (msg in conv.chatMessages) {
                 // Always prefer content blocks over raw text to properly exclude thinking
+                val answerBlocks = msg.content.filter { it.type != "thinking" }
                 val mergedText = if (msg.content.isNotEmpty()) {
-                    msg.content.filter { it.type != "thinking" }.map { it.text }.joinToString("")
+                    answerBlocks.joinToString("") { it.text }
                 } else {
                     msg.text
                 }
+                val importedCitations = mutableListOf<CitationRecord>()
+                var answerOffset = 0
+                answerBlocks.forEach { block ->
+                    block.citations.mapNotNullTo(importedCitations) { citation ->
+                        projectClaudeCitation(citation, answerOffset, block.text)
+                    }
+                    answerOffset += block.text.length
+                }
+                val citationJson = encodeImportedCitations(importedCitations, mergedText)
 
                 // Claude export does not embed image binary data; images are metadata-only in the files array
 
@@ -256,7 +262,7 @@ class ClaudeChatImporter {
                         timestamp = iso8601ToMillis(msg.createdAt),
                         thoughtTimeMs = null,
                         modelName = null,
-                        toolCallJson = null,
+                        toolCallJson = citationJson,
                         attachmentMeta = attachmentMeta
                     )
                 )

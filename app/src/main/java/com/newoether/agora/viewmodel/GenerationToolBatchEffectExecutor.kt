@@ -1,11 +1,15 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.api.StreamEvent
+import com.newoether.agora.model.CitationPolicy
+import com.newoether.agora.model.CitationRecord
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.model.ToolExecutionStates
+import com.newoether.agora.model.toCitationRecord
+import com.newoether.agora.model.toMessageSegment
 import com.newoether.agora.tool.ToolExecutionEvent
 import com.newoether.agora.tool.ToolExecutionResult
 import com.newoether.agora.util.Constants
@@ -17,26 +21,60 @@ internal class GenerationToolOverlay(
     private val providerName: String,
 ) {
     private val segments = mutableListOf(MessageSegment(type = "answer"))
+    private val citations = mutableListOf<CitationRecord>()
     private val streamIndices = mutableMapOf<String, Int>()
 
     val size: Int
         get() = segments.size
 
-    fun snapshot(): List<MessageSegment> = segments.toList()
+    fun snapshot(): List<MessageSegment> =
+        segments.toList() + citations.map { it.toMessageSegment() }
+
+    fun contentSnapshot(): List<MessageSegment> = segments.toList()
 
     fun replaceAll(replacement: List<MessageSegment>) {
         segments.clear()
-        segments.addAll(replacement)
+        citations.clear()
+        replacement.forEach { segment ->
+            if (segment.type == "citation") {
+                segment.toCitationRecord()?.let(::upsertCitation)
+            } else {
+                segments += segment
+            }
+        }
         streamIndices.clear()
     }
 
     fun prependAll(prefix: List<MessageSegment>) {
         if (prefix.isEmpty()) return
-        segments.addAll(0, prefix)
-        streamIndices.entries.forEach { entry -> entry.setValue(entry.value + prefix.size) }
+        val contentPrefix = prefix.filter { it.type != "citation" }
+        prefix.mapNotNull { it.toCitationRecord() }.forEach(::upsertCitation)
+        if (contentPrefix.isEmpty()) return
+        segments.addAll(0, contentPrefix)
+        streamIndices.entries.forEach { entry -> entry.setValue(entry.value + contentPrefix.size) }
     }
 
-    fun append(segment: MessageSegment) = appendMergedSegment(segments, segment)
+    fun append(segment: MessageSegment) {
+        if (segment.type == "citation") {
+            segment.toCitationRecord()?.let(::upsertCitation)
+        } else {
+            appendMergedSegment(segments, segment)
+        }
+    }
+
+    fun upsertCitation(raw: CitationRecord): Boolean {
+        val citation = CitationPolicy.normalize(raw) ?: return false
+        val index = citations.indexOfFirst { it.sourceId == citation.sourceId }
+        if (index < 0) {
+            if (citations.size >= CitationPolicy.MAX_SOURCES) return false
+            citations += citation
+            return true
+        }
+        val merged = CitationPolicy.merge(citations[index], citation)
+        val changed = merged != citations[index]
+        citations[index] = merged
+        return changed
+    }
 
     fun hasStream(streamKey: String): Boolean = streamKey in streamIndices
 

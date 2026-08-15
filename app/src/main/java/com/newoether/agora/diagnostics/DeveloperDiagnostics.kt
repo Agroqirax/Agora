@@ -211,6 +211,14 @@ object DeveloperDiagnostics {
                 attributes = mapOf("chars" to text.length.toString()),
                 content = captureParsedContent(text, mode),
             )
+            is StreamEvent.CitationUpdate -> ParsedEventDetails(
+                eventType = "CitationUpdate",
+                attributes = mapOf(
+                    "provider" to DiagnosticRedactor.safeIdentifier(citation.provider),
+                    "kind" to DiagnosticRedactor.safeIdentifier(citation.kind),
+                    "anchors" to citation.anchors.size.toString(),
+                ),
+            )
             is StreamEvent.ThoughtChunk -> ParsedEventDetails(
                 eventType = "ThoughtChunk",
                 attributes = mapOf(

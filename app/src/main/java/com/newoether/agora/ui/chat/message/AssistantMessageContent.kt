@@ -33,17 +33,21 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationPolicy
+import com.newoether.agora.model.CitationRecord
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.model.ThinkingSegmentDisplayModes
+import com.newoether.agora.model.citationRecords
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
 
@@ -174,6 +178,7 @@ internal fun AssistantMessageContent(
     groupedSegmentAutoExpansionController: GroupedSegmentAutoExpansionController,
     thoughtExpandedStates: SnapshotStateMap<String, Boolean>,
     renderContext: ChatMarkdownRenderContext,
+    searchHighlight: SearchHighlightSpec?,
     branchIndex: Int,
     totalBranches: Int,
     onSwitchBranch: (Int) -> Unit,
@@ -191,6 +196,35 @@ internal fun AssistantMessageContent(
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
     val haptics = LocalAgoraHaptics.current
+    val uriHandler = LocalUriHandler.current
+    val citations = remember(message.text, message.segments) {
+        message.citationRecords()
+    }
+    var selectedCitation by remember(message.id) { mutableStateOf<CitationRecord?>(null) }
+    var showCitationSources by remember(message.id) { mutableStateOf(false) }
+    var groupedCitationSources by remember(message.id) {
+        mutableStateOf<List<CitationRecord>?>(null)
+    }
+    val onSingleCitationActivate: (CitationRecord) -> Unit = { source ->
+        val safeUrl = CitationPolicy.safeHttpUrl(source.url)
+        if (safeUrl == null || runCatching { uriHandler.openUri(safeUrl) }.isFailure) {
+            selectedCitation = source
+        }
+    }
+    val onCitationActivate: (List<CitationRecord>) -> Unit = { sources ->
+        if (sources.size > 1) {
+            showCitationSources = false
+            groupedCitationSources = sources
+        } else {
+            sources.singleOrNull()?.let(onSingleCitationActivate)
+        }
+    }
+    selectedCitation?.let { source ->
+        CitationSourceDetailDialog(
+            source = source,
+            onDismiss = { selectedCitation = null },
+        )
+    }
     var showMenu by remember(message.id) { mutableStateOf(false) }
     var regenerateRequested by remember(message.id) { mutableStateOf(false) }
     var observedRegenerationExit by remember(message.id) { mutableStateOf(false) }
@@ -205,8 +239,43 @@ internal fun AssistantMessageContent(
         }
     }
     val regenerationActionsExiting = regenerateRequested || isRegenerationExiting
-    LaunchedEffect(regenerationActionsExiting) {
+    val actionAvailability = assistantActionAvailability(
+        isStreaming = isStreaming,
+        isLoading = isLoading,
+        regenerateRequested = regenerationActionsExiting,
+    )
+    val sourcesSummaryVisible = citationSummaryVisible(
+        showActions = showActions,
+        informationVisible = actionAvailability.informationVisible,
+        sourceCount = citations.size,
+    )
+    LaunchedEffect(regenerationActionsExiting, sourcesSummaryVisible) {
         if (regenerationActionsExiting) showMenu = false
+        if (!sourcesSummaryVisible) showCitationSources = false
+    }
+    if (showCitationSources) {
+        CitationSourcesBottomSheet(
+            messageId = message.id,
+            citations = citations,
+            searchSpec = searchHighlight,
+            onActivate = { source ->
+                haptics.confirm()
+                onSingleCitationActivate(source)
+            },
+            onDismiss = { showCitationSources = false },
+        )
+    }
+    groupedCitationSources?.let { groupedSources ->
+        CitationSourcesBottomSheet(
+            messageId = message.id,
+            citations = groupedSources,
+            searchSpec = searchHighlight,
+            onActivate = { source ->
+                haptics.confirm()
+                onSingleCitationActivate(source)
+            },
+            onDismiss = { groupedCitationSources = null },
+        )
     }
     // During generation, eat horizontal nested-scroll so code blocks
     // cannot be panned. Vertical scroll and taps (thinking header,
@@ -381,6 +450,8 @@ internal fun AssistantMessageContent(
                         autoExpansionController = groupedSegmentAutoExpansionController,
                         expandedStates = thoughtExpandedStates,
                         renderContext = renderContext,
+                        citations = citations,
+                        onCitationActivate = onCitationActivate,
                         segmentAppearanceRegistry = segmentAppearanceRegistry,
                         onLayoutMutationStarted = onLayoutMutationStarted,
                         onLayoutMutationSettled = onLayoutMutationSettled,
@@ -427,34 +498,47 @@ internal fun AssistantMessageContent(
                 }
 
                 val answerBodyText = errorContent?.answerText ?: renderedText.takeIf { !isError }
+                val answerProjection = remember(answerBodyText, citations, isStreaming) {
+                    citationMarkdownProjection(
+                        answerText = answerBodyText.orEmpty(),
+                        citations = citations,
+                        isStreaming = isStreaming,
+                    )
+                }
+                val answerContent = answerProjection?.markdown ?: answerBodyText.orEmpty()
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .noOpBringIntoView()
                 ) {
-                    if (!answerBodyText.isNullOrEmpty() && !useTimelineSegments) {
-                        if (compactAnswerAppearanceKey != null) {
-                            AnimatedTimelineBlockAppearance(
-                                animationKey = compactAnswerAppearanceKey,
-                                appearanceRegistry = segmentAppearanceRegistry,
-                                isStreaming = isStreaming,
-                            ) {
+                    if (answerContent.isNotEmpty() && !useTimelineSegments) {
+                        CitationInlineContentHost(
+                            projection = answerProjection,
+                            onActivate = onCitationActivate,
+                        ) {
+                            if (compactAnswerAppearanceKey != null) {
+                                AnimatedTimelineBlockAppearance(
+                                    animationKey = compactAnswerAppearanceKey,
+                                    appearanceRegistry = segmentAppearanceRegistry,
+                                    isStreaming = isStreaming,
+                                ) {
+                                    StreamingMarkdownMessage(
+                                        content = answerContent,
+                                        isStreaming = isStreaming,
+                                        renderContext = renderContext,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        selectionEnabled = !isStreaming,
+                                    )
+                                }
+                            } else {
                                 StreamingMarkdownMessage(
-                                    content = answerBodyText,
+                                    content = answerContent,
                                     isStreaming = isStreaming,
                                     renderContext = renderContext,
                                     modifier = Modifier.fillMaxWidth(),
                                     selectionEnabled = !isStreaming,
                                 )
                             }
-                        } else {
-                            StreamingMarkdownMessage(
-                                content = answerBodyText,
-                                isStreaming = isStreaming,
-                                renderContext = renderContext,
-                                modifier = Modifier.fillMaxWidth(),
-                                selectionEnabled = !isStreaming,
-                            )
                         }
                     }
                 }
@@ -489,11 +573,6 @@ internal fun AssistantMessageContent(
                     }
                 }
                 if (message.participant == Participant.MODEL && showActions) {
-                    val actionAvailability = assistantActionAvailability(
-                        isStreaming = isStreaming,
-                        isLoading = isLoading,
-                        regenerateRequested = regenerationActionsExiting,
-                    )
                     val informationActionsAlpha by animateFloatAsState(
                         targetValue = if (actionAvailability.informationVisible) 1f else 0f,
                         animationSpec = tween(
@@ -528,6 +607,22 @@ internal fun AssistantMessageContent(
                         MaterialTheme.colorScheme.error.copy(
                             alpha = if (actionAvailability.terminalEnabled) 1f else 0.38f
                         )
+                    if (citations.isNotEmpty()) {
+                        CitationSourcesSummaryCapsule(
+                            messageId = message.id,
+                            citations = citations,
+                            searchSpec = searchHighlight,
+                            visible = sourcesSummaryVisible,
+                            enabled = sourcesSummaryVisible,
+                            onClick = {
+                                haptics.confirm()
+                                groupedCitationSources = null
+                                showCitationSources = true
+                            },
+                            modifier = Modifier
+                                .padding(top = 12.dp),
+                        )
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

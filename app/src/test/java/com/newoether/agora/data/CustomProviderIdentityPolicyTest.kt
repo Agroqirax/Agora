@@ -1,5 +1,11 @@
 package com.newoether.agora.data
 
+import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationAnchor
+import com.newoether.agora.model.CitationPolicy
+import com.newoether.agora.model.Participant
+import com.newoether.agora.model.citationRecords
+import com.newoether.agora.model.toMessageSegment
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
@@ -131,6 +137,35 @@ class CustomProviderIdentityPolicyTest {
 
         assertEquals("Custom", providerDisplayName(id, emptyList()))
         assertEquals("model (Custom)", modelDisplayName("$id:model", emptyMap(), emptyList()))
+    }
+
+    @Test
+    fun citationSegmentsBypassCustomProviderDisplayReplacement() {
+        val id = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val answer = "Claim"
+        val citation = requireNotNull(
+            CitationPolicy.create(
+                provider = "custom",
+                kind = "file",
+                title = "Source",
+                providerSourceId = id,
+                anchors = listOf(CitationAnchor(0, answer.length, answer)),
+                answerText = answer,
+            ),
+        )
+        val segment = citation.toMessageSegment()
+        val message = ChatMessage(
+            text = answer,
+            participant = Participant.MODEL,
+            segments = listOf(segment),
+        )
+
+        val displayed = message.forDisplay(
+            listOf(CustomProviderConfig(name = "Relay X", id = id)),
+        )
+
+        assertEquals(segment, displayed.segments?.single())
+        assertEquals(id, displayed.citationRecords().single().providerSourceId)
     }
 
     @Test

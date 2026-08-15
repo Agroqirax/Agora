@@ -123,6 +123,7 @@ internal data class AnthropicDelta(
     val thinking: String? = null,
     val signature: String? = null,
     @SerialName("partial_json") val partialJson: String? = null,
+    val citation: JsonElement? = null,
     val type: String? = null,
     // Protocol location of the terminal reason:
     //   {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{...}}
@@ -140,6 +141,7 @@ internal data class AnthropicContentBlock(
     val name: String? = null,
     val input: JsonObject? = null,
     val text: String? = null,
+    val citations: List<JsonElement>? = null,
     val thinking: String? = null,
     val signature: String? = null
 )

@@ -152,6 +152,10 @@
     <string name="import_invalid_gguf_title">無効な GGUF ファイル</string>
     <string name="import_invalid_gguf_desc">選択したファイルは有効な GGUF モデルではありません。</string>
     <string name="ok">OK</string>
+    <string name="citation_sources">出典</string>
+    <string name="citation_source_accessibility">出典 %1$d: %2$s</string>
+    <string name="citation_source_file">ファイル</string>
+    <string name="citation_source_location">位置</string>
     <string name="generation_retry_attempt">再試行 %1$d/%2$d</string>
     <string name="action">アクション</string>
     <string name="video">動画</string>

@@ -33,9 +33,12 @@ import androidx.compose.ui.semantics.collectionItemInfo
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.ui.components.LatexImageTransformer
@@ -66,6 +69,7 @@ import com.mikepenz.markdown.compose.elements.LocalTableRowIndex
 import com.mikepenz.markdown.compose.elements.material.MarkdownBasicText
 import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import com.mikepenz.markdown.annotator.AnnotatorSettings
 import com.mikepenz.markdown.annotator.annotatorSettings
 import com.mikepenz.markdown.annotator.buildMarkdownAnnotatedString
 import org.intellij.markdown.MarkdownElementTypes
@@ -94,12 +98,47 @@ internal class ChatMarkdownAssets(
     val flavour: MarkdownFlavourDescriptor,
 )
 
+internal fun chatLinkTextStyles(color: Color): TextLinkStyles {
+    val style = SpanStyle(
+        color = color,
+        textDecoration = TextDecoration.None,
+    )
+    return TextLinkStyles(
+        style = style,
+        focusedStyle = style,
+        hoveredStyle = style,
+        pressedStyle = style,
+    )
+}
+
+internal fun buildCitationAwareMarkdownAnnotatedString(
+    content: String,
+    textNode: ASTNode,
+    style: TextStyle,
+    annotatorSettings: AnnotatorSettings,
+    citationTokens: Map<Char, CitationInlineToken>,
+    literalText: String? = null,
+): AnnotatedString {
+    val annotated = if (literalText != null) {
+        AnnotatedString(literalText)
+    } else {
+        content.buildMarkdownAnnotatedString(
+            textNode = textNode,
+            style = style,
+            annotatorSettings = annotatorSettings,
+        )
+    }
+    return annotated.replaceCitationInlineTokens(citationTokens)
+}
+
 @Composable
 internal fun rememberChatMarkdownAssets(
     textColor: Color,
     searchHighlight: SearchHighlightSpec? = null,
     parseInlineDollarMath: Boolean = false,
 ): ChatMarkdownAssets {
+    val linkColor = MaterialTheme.colorScheme.primary
+    val linkTextStyles = remember(linkColor) { chatLinkTextStyles(linkColor) }
     // Chat-specific markdown scale — optimized for immersive reading.
     // Outfit's large x-height means 15sp reads like ~16sp Roboto.
     // Heading steps of 3sp (h1→h2→h3) and 2sp (h3→h4) create
@@ -118,6 +157,7 @@ internal fun rememberChatMarkdownAssets(
         h6 = ChatType.mdH6,
         code = ChatType.code,
         inlineCode = ChatType.code,
+        textLink = linkTextStyles,
         table = ChatType.body,
     )
 
@@ -138,6 +178,7 @@ internal fun rememberChatMarkdownAssets(
         h6 = ChatType.thH6,
         code = ChatType.thoughtCode,
         inlineCode = ChatType.thoughtCode,
+        textLink = linkTextStyles,
     )
 
     val fg = MaterialTheme.colorScheme.onBackground
@@ -561,16 +602,16 @@ private fun SearchHighlightedMarkdownText(
     activeHighlightColor: Color,
 ) {
     val settings = annotatorSettings()
-    val base = remember(model.content, textNode, style, literalText, settings) {
-        if (literalText != null) {
-            AnnotatedString(literalText)
-        } else {
-            model.content.buildMarkdownAnnotatedString(
-                textNode = textNode,
-                style = style,
-                annotatorSettings = settings,
-            )
-        }
+    val citationTokens = LocalCitationInlineTokens.current
+    val base = remember(model.content, textNode, style, literalText, settings, citationTokens) {
+        buildCitationAwareMarkdownAnnotatedString(
+            content = model.content,
+            textNode = textNode,
+            style = style,
+            annotatorSettings = settings,
+            citationTokens = citationTokens,
+            literalText = literalText,
+        )
     }
     val streamingFadeSpec = LocalStreamingGlyphFadeSpec.current
     val fadeTargetOffset = streamingFadeSpec?.lastVisibleSourceOffset

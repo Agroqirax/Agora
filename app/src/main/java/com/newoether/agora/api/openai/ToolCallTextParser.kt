@@ -8,6 +8,8 @@ import com.newoether.agora.api.toTokenUsage
 import com.newoether.agora.api.util.ToolArgumentAccumulator
 import com.newoether.agora.api.util.safeWireToolCallId
 import com.newoether.agora.api.util.safeWireToolName
+import com.newoether.agora.model.CitationAnchor
+import com.newoether.agora.model.CitationPolicy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -173,13 +175,29 @@ internal class OpenAiResponsesEventRouter(
         var completed: Boolean = false,
     )
 
+    private data class OutputTextPartKey(
+        val itemId: String?,
+        val outputIndex: Int?,
+        val contentIndex: Int?,
+    )
+
+    private data class OutputTextPart(
+        val key: OutputTextPartKey,
+        val text: StringBuilder,
+        val globalStart: Int,
+        var globalEnd: Int,
+        var contiguous: Boolean = true,
+    )
+
     private val callsByOutputIndex = linkedMapOf<Int, FunctionCall>()
     private val callsByItemId = mutableMapOf<String, FunctionCall>()
     private val responseItemsByOutputIndex = linkedMapOf<Int, JsonObject>()
     private val openHostedOutputIndexes = mutableSetOf<Int>()
     private val completedCallsByOutputIndex = mutableMapOf<Int, StreamEvent.ToolCallRequest>()
     private val emittedCallIds = mutableSetOf<String>()
-    private val emittedCitationUrls = mutableSetOf<String>()
+    private val emittedCitationKeys = mutableSetOf<String>()
+    private val outputTextParts = linkedMapOf<OutputTextPartKey, OutputTextPart>()
+    private val answerText = StringBuilder()
     private var lastSummaryOutputIndex: Int? = null
     private var lastSummaryIndex: Int? = null
     private var lastSequenceNumber: Int? = null
@@ -205,7 +223,10 @@ internal class OpenAiResponsesEventRouter(
             "response.reasoning_summary_text.done", "response.content_part.added",
             "response.content_part.done" -> emptyList()
             "response.output_text.delta" -> event.delta?.takeIf(String::isNotEmpty)
-                ?.let { listOf(StreamEvent.TextChunk(it)) }.orEmpty()
+                ?.let { delta ->
+                    appendOutputText(event, delta)
+                    listOf(StreamEvent.TextChunk(delta))
+                }.orEmpty()
             "response.output_text.annotation.added" -> routeCitation(event)
             "response.reasoning_text.delta" ->
                 event.delta?.takeIf { thinkingEnabled && it.isNotEmpty() }
@@ -247,15 +268,112 @@ internal class OpenAiResponsesEventRouter(
     }
 
     private fun routeCitation(event: OpenAiResponseStreamEvent): List<StreamEvent> {
-        val annotation = event.annotation ?: return fail(event.type, "missing annotation")
-        if (annotation.type != "url_citation") return emptyList()
-        val url = annotation.url?.takeIf {
-            (it.startsWith("https://") || it.startsWith("http://")) && it.none(Char::isWhitespace)
-        } ?: return fail(event.type, "url citation has invalid url")
-        if (!emittedCitationUrls.add(url)) return emptyList()
-        val title = (annotation.title?.takeIf(String::isNotBlank) ?: url)
-            .replace("[", "\\[").replace("]", "\\]")
-        return listOf(StreamEvent.TextChunk("\n\n[$title](${url.replace(")", "%29")})"))
+        val annotation = event.annotation ?: return emptyList()
+        val anchors = citationAnchors(event, annotation.startIndex, annotation.endIndex)
+        val citation = when (annotation.type) {
+            "url_citation" -> CitationPolicy.create(
+                provider = "openai",
+                kind = "url",
+                title = annotation.title,
+                url = annotation.url,
+                anchors = anchors,
+                answerText = answerText.toString(),
+            )
+            "file_citation", "container_file_citation" -> CitationPolicy.create(
+                provider = "openai",
+                kind = "file",
+                title = annotation.title ?: annotation.filename,
+                fileName = annotation.filename,
+                providerSourceId = annotation.fileId ?: annotation.containerId,
+                anchors = anchors,
+                answerText = answerText.toString(),
+            )
+            else -> null
+        } ?: return emptyList()
+        val eventKey = buildString {
+            append(citation.sourceId)
+            citation.anchors.forEach { anchor ->
+                append(':').append(anchor.startIndex).append(':').append(anchor.endIndex)
+            }
+        }
+        if (!emittedCitationKeys.add(eventKey)) return emptyList()
+        return listOf(StreamEvent.CitationUpdate(citation))
+    }
+
+    private fun outputTextPartKey(event: OpenAiResponseStreamEvent): OutputTextPartKey? =
+        OutputTextPartKey(
+            itemId = event.itemId,
+            outputIndex = event.outputIndex,
+            contentIndex = event.contentIndex,
+        ).takeUnless { key ->
+            key.itemId == null && key.outputIndex == null && key.contentIndex == null
+        }
+
+    private fun findOutputTextPart(event: OpenAiResponseStreamEvent): OutputTextPart? {
+        val key = outputTextPartKey(event) ?: return null
+        outputTextParts[key]?.let { return it }
+        return outputTextParts.values.filter { part ->
+            (key.itemId == null || part.key.itemId == null || key.itemId == part.key.itemId) &&
+                (
+                    key.outputIndex == null ||
+                        part.key.outputIndex == null ||
+                        key.outputIndex == part.key.outputIndex
+                    ) &&
+                (
+                    key.contentIndex == null ||
+                        part.key.contentIndex == null ||
+                        key.contentIndex == part.key.contentIndex
+                    )
+        }.singleOrNull()
+    }
+
+    private fun appendOutputText(event: OpenAiResponseStreamEvent, delta: String) {
+        val key = outputTextPartKey(event)
+        if (key == null) {
+            answerText.append(delta)
+            return
+        }
+        val part = findOutputTextPart(event) ?: OutputTextPart(
+            key = key,
+            text = StringBuilder(),
+            globalStart = answerText.length,
+            globalEnd = answerText.length,
+        ).also { outputTextParts[key] = it }
+        if (part.globalEnd != answerText.length) part.contiguous = false
+        part.text.append(delta)
+        answerText.append(delta)
+        part.globalEnd = answerText.length
+    }
+
+    private fun citationAnchors(
+        event: OpenAiResponseStreamEvent,
+        startIndex: Int?,
+        endIndex: Int?,
+    ): List<CitationAnchor> {
+        val start = startIndex ?: return emptyList()
+        val end = endIndex ?: return emptyList()
+        val key = outputTextPartKey(event)
+        val part = when {
+            key != null -> findOutputTextPart(event)
+            outputTextParts.isEmpty() -> null
+            else -> outputTextParts.values.singleOrNull() ?: return emptyList()
+        }
+        if (key != null && part == null) return emptyList()
+        if (part?.contiguous == false) return emptyList()
+        val scopedText = part?.text ?: answerText
+        if (start < 0 || end <= start || end > scopedText.length) return emptyList()
+        val globalStart = (part?.globalStart ?: 0) + start
+        val globalEnd = (part?.globalStart ?: 0) + end
+        if (globalEnd > answerText.length) return emptyList()
+        val citedText = scopedText.substring(start, end)
+        if (answerText.substring(globalStart, globalEnd) != citedText) return emptyList()
+        return listOf(
+            CitationAnchor(
+                startIndex = globalStart,
+                endIndex = globalEnd,
+                citedText = citedText,
+            ),
+        )
     }
 
     private fun addOutputItem(event: OpenAiResponseStreamEvent): List<StreamEvent> {

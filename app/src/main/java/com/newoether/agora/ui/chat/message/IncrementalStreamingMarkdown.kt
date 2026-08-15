@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import com.newoether.agora.util.NoAutoScrollSelectionContainer
+import com.mikepenz.markdown.compose.LocalMarkdownInlineContent
 import com.mikepenz.markdown.compose.MarkdownElement
 import com.mikepenz.markdown.model.ReferenceLinkHandlerImpl
 import com.mikepenz.markdown.model.State
@@ -564,6 +565,7 @@ private fun ParsedMarkdownBlockContent(
     root: ASTNode,
     renderContext: ChatMarkdownRenderContext,
 ) {
+    val inlineContent = LocalMarkdownInlineContent.current
     val state = remember(sourceContent, root) {
         State.Success(
             node = root,
@@ -581,6 +583,7 @@ private fun ParsedMarkdownBlockContent(
         components = renderContext.components,
         annotator = renderContext.annotator,
         imageTransformer = renderContext.imageTransformer,
+        inlineContent = inlineContent,
         animations = markdownAnimations { this },
         success = { successState, components, successModifier ->
             Column(successModifier) {

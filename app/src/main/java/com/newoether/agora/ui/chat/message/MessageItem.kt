@@ -213,7 +213,9 @@ internal fun MessageItem(
         }
         SearchHighlightSpec(
             query = query,
-            activeRange = active?.let { it.start until it.endExclusive },
+            activeRange = active
+                ?.takeIf { it.citationSourceId == null }
+                ?.let { it.start until it.endExclusive },
             activeKey = active?.key,
             matchKeys = matchKeys,
             onMatchPosition = onSearchMatchPosition,
@@ -335,6 +337,7 @@ internal fun MessageItem(
                             groupedSegmentAutoExpansionController,
                         thoughtExpandedStates = thoughtExpandedStates,
                         renderContext = markdownRenderContext,
+                        searchHighlight = searchHighlight,
                         branchIndex = branchIndex,
                         totalBranches = totalBranches,
                         onSwitchBranch = onSwitchBranch,

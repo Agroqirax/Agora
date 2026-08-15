@@ -152,6 +152,10 @@
     <string name="import_invalid_gguf_title">ملف GGUF غير صالح</string>
     <string name="import_invalid_gguf_desc">الملف المحدد ليس نموذج GGUF صالحًا.</string>
     <string name="ok">موافق</string>
+    <string name="citation_sources">المصادر</string>
+    <string name="citation_source_accessibility">المصدر %1$d: %2$s</string>
+    <string name="citation_source_file">ملف</string>
+    <string name="citation_source_location">الموقع</string>
     <string name="generation_retry_attempt">إعادة المحاولة %1$d/%2$d</string>
     <string name="action">إجراء</string>
     <string name="video">فيديو</string>

@@ -120,6 +120,7 @@ import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CitationRecord
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
@@ -569,6 +570,8 @@ internal fun TimelineSegmentsContent(
     autoExpansionController: GroupedSegmentAutoExpansionController,
     expandedStates: SnapshotStateMap<String, Boolean>,
     renderContext: ChatMarkdownRenderContext,
+    citations: List<CitationRecord>,
+    onCitationActivate: (List<CitationRecord>) -> Unit,
     segmentAppearanceRegistry: SegmentAppearanceRegistry,
     onLayoutMutationStarted: (String) -> Unit,
     onLayoutMutationSettled: (String) -> Unit,
@@ -576,6 +579,7 @@ internal fun TimelineSegmentsContent(
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         var detailIndex = 0
+        var answerOffset = 0
         var index = 0
         var previousVisibleWasAnswer = false
         val lastVisibleSegmentIndex = segments.indexOfLast { segment ->
@@ -588,6 +592,16 @@ internal fun TimelineSegmentsContent(
                     if (seg.content.isNotBlank()) {
                         val answerIsStreaming =
                             isStreaming && index == lastVisibleSegmentIndex
+                        val citationProjection = citationMarkdownProjection(
+                            answerText = seg.content,
+                            citations = citationRecordsForAnswerSlice(
+                                citations = citations,
+                                sliceStart = answerOffset,
+                                sliceText = seg.content,
+                            ),
+                            isStreaming = answerIsStreaming,
+                        )
+                        val answerContent = citationProjection?.markdown ?: seg.content
                         val answerAppearanceKey =
                             "${segmentAppearanceKey(message.id, index, seg)}:timeline"
                         AnimatedTimelineBlockAppearance(
@@ -600,19 +614,25 @@ internal fun TimelineSegmentsContent(
                                     .fillMaxWidth()
                                     .padding(top = if (index == 0) 0.dp else 6.dp)
                             ) {
-                                StreamingMarkdownMessage(
-                                    content = seg.content,
-                                    isStreaming = answerIsStreaming,
-                                    renderContext = renderContext,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .noOpBringIntoView(),
-                                    selectionEnabled = !answerIsStreaming,
-                                )
+                                CitationInlineContentHost(
+                                    projection = citationProjection,
+                                    onActivate = onCitationActivate,
+                                ) {
+                                    StreamingMarkdownMessage(
+                                        content = answerContent,
+                                        isStreaming = answerIsStreaming,
+                                        renderContext = renderContext,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .noOpBringIntoView(),
+                                        selectionEnabled = !answerIsStreaming,
+                                    )
+                                }
                             }
                         }
                         previousVisibleWasAnswer = true
                     }
+                    answerOffset += seg.content.length
                     index++
                 }
                 "thought", "tool", "transcription" -> {

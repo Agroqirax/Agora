@@ -37,7 +37,7 @@ data class ToolImageAttachment(
 
 @Serializable
 data class MessageSegment(
-    val type: String, // "answer", "thought", "tool", "transcription", or terminal "error"
+    val type: String, // "answer", "thought", "tool", "citation", "transcription", or terminal "error"
     val content: String = "",
     val toolName: String? = null,
     val toolArgs: String? = null,

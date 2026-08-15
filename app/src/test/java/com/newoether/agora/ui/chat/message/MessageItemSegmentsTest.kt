@@ -23,6 +23,26 @@ class MessageItemSegmentsTest {
     }
 
     @Test
+    fun uiSegmentPreparationHidesOnlyExactGeminiGoogleSearchTool() {
+        val merged = mergeAdjacentSegments(
+            listOf(
+                MessageSegment(type = "answer", content = "Answer"),
+                MessageSegment(type = "tool", toolName = "google_search", toolResult = "{}"),
+                MessageSegment(type = "tool", toolName = "web_search", toolResult = "{}"),
+                MessageSegment(type = "tool", toolName = "openai_search", toolResult = "{}"),
+                MessageSegment(type = "tool", toolName = "code_execution", toolResult = "{}"),
+                MessageSegment(type = "tool", toolName = "Google_Search", toolResult = "{}"),
+            ),
+        )
+
+        assertEquals(
+            listOf("web_search", "openai_search", "code_execution", "Google_Search"),
+            merged.filter { it.type == "tool" }.map { it.toolName },
+        )
+        assertEquals("Answer", merged.first().content)
+    }
+
+    @Test
     fun realThoughtSegmentMayUseMessageThoughtDuration() {
         val segments = listOf(
             MessageSegment(type = "thought", content = "Reasoning"),

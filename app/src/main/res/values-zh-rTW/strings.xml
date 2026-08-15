@@ -80,6 +80,10 @@
     <string name="import_invalid_gguf_title">無效的 GGUF 檔案</string>
     <string name="import_invalid_gguf_desc">所選檔案不是有效的 GGUF 模型檔案。</string>
     <string name="ok">確定</string>
+    <string name="citation_sources">來源</string>
+    <string name="citation_source_accessibility">來源 %1$d：%2$s</string>
+    <string name="citation_source_file">檔案</string>
+    <string name="citation_source_location">位置</string>
     <string name="generation_retry_attempt">重試 %1$d/%2$d</string>
 
     <!-- Settings - Main -->

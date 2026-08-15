@@ -135,6 +135,7 @@ import com.mikepenz.markdown.model.State
 import com.mikepenz.markdown.model.rememberMarkdownState
 import com.mikepenz.markdown.compose.components.MarkdownComponents
 import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.LocalMarkdownInlineContent
 import com.mikepenz.markdown.compose.MarkdownElement
 import com.mikepenz.markdown.compose.elements.MarkdownTable
 import com.mikepenz.markdown.compose.elements.MarkdownTableHeader
@@ -222,6 +223,7 @@ private fun MarkdownPreparedTextContent(
     lazyListState: LazyListState? = null,
     lazyContentPadding: PaddingValues = PaddingValues(),
 ) {
+    val inlineContent = LocalMarkdownInlineContent.current
     val markdownText = text
     val markdownParser = remember(markdownText, renderContext.flavour) {
         MarkdownParser(renderContext.flavour)
@@ -252,6 +254,7 @@ private fun MarkdownPreparedTextContent(
         components = renderContext.components,
         annotator = renderContext.annotator,
         imageTransformer = renderContext.imageTransformer,
+        inlineContent = inlineContent,
         animations = markdownAnimations { this },
         success = { successState, components, modifier ->
             if (lazyListState == null) {

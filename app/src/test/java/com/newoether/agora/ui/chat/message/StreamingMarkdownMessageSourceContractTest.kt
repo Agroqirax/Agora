@@ -67,6 +67,29 @@ class StreamingMarkdownMessageSourceContractTest {
     }
 
     @Test
+    fun `normal and incremental Markdown roots explicitly forward inline content`() {
+        val root = locateMainSourceRoot()
+        val normal = source(root, "MessageItemMarkdown.kt")
+        val incremental = source(root, "IncrementalStreamingMarkdown.kt")
+        val timeline = source(root, "MessageItemTimeline.kt")
+        val citation = source(root, "CitationMessageContent.kt")
+
+        listOf(normal, incremental).forEach { owner ->
+            assertTrue(owner.contains("val inlineContent = LocalMarkdownInlineContent.current"))
+            assertTrue(owner.contains("inlineContent = inlineContent,"))
+        }
+        assertEquals(
+            2,
+            Regex("isStreaming = answerIsStreaming").findAll(timeline).count(),
+        )
+        assertTrue(citation.contains("internal fun citationMarkdownProjection("))
+        assertFalse(citation.contains("terminalCitationMarkdownProjection"))
+        assertTrue(citation.contains("val unsupported by lazy(LazyThreadSafetyMode.NONE)"))
+        assertTrue(citation.contains("boundedTrailingCitationWrapperStart("))
+        assertFalse(citation.contains("answerText.lastIndexOf(\"([\")"))
+    }
+
+    @Test
     fun `low level incremental renderer has exactly one UI caller`() {
         val root = locateMainSourceRoot()
         val consumers = root.walkTopDown()

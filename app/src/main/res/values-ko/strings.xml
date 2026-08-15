@@ -152,6 +152,10 @@
     <string name="import_invalid_gguf_title">잘못된 GGUF 파일</string>
     <string name="import_invalid_gguf_desc">선택한 파일은 유효한 GGUF 모델이 아닙니다.</string>
     <string name="ok">확인</string>
+    <string name="citation_sources">출처</string>
+    <string name="citation_source_accessibility">출처 %1$d: %2$s</string>
+    <string name="citation_source_file">파일</string>
+    <string name="citation_source_location">위치</string>
     <string name="generation_retry_attempt">재시도 %1$d/%2$d</string>
     <string name="action">작업</string>
     <string name="video">동영상</string>

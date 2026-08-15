@@ -152,6 +152,10 @@
     <string name="import_invalid_gguf_title">Ungültige GGUF-Datei</string>
     <string name="import_invalid_gguf_desc">Die ausgewählte Datei ist kein gültiges GGUF-Modell.</string>
     <string name="ok">OK</string>
+    <string name="citation_sources">Quellen</string>
+    <string name="citation_source_accessibility">Quelle %1$d: %2$s</string>
+    <string name="citation_source_file">Datei</string>
+    <string name="citation_source_location">Position</string>
     <string name="generation_retry_attempt">Wiederholung %1$d/%2$d</string>
     <string name="action">Aktion</string>
     <string name="video">Video</string>

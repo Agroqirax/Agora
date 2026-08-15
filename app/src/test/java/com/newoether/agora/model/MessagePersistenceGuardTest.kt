@@ -4,6 +4,7 @@ import com.newoether.agora.util.Constants
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -78,6 +79,31 @@ class MessagePersistenceGuardTest {
 
         assertTrue(error is IllegalStateException)
         assertTrue(error?.message.orEmpty().contains("continuation state"))
+    }
+
+    @Test
+    fun citationSegmentRemainsDecodableWithinPersistenceBudget() {
+        val answer = "Claim"
+        val citation = requireNotNull(
+            CitationPolicy.create(
+                provider = "test",
+                kind = "web",
+                title = "Source",
+                url = "https://example.com/source",
+                anchors = listOf(CitationAnchor(0, answer.length, answer)),
+                answerText = answer,
+            ),
+        )
+        val encoded = requireNotNull(
+            MessagePersistenceGuard.encodeSegmentsBounded(
+                listOf(citation.toMessageSegment()),
+            ),
+        )
+
+        assertEquals(
+            listOf(citation),
+            Json.decodeFromString<List<MessageSegment>>(encoded).citationRecords(answer),
+        )
     }
 
     @Test

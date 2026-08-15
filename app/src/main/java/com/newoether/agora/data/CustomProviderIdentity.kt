@@ -244,17 +244,20 @@ private fun ToolCallData.forDisplay(
 
 private fun MessageSegment.forDisplay(
     customProviders: List<CustomProviderConfig>,
-): MessageSegment = copy(
-    content = replaceCustomProviderIdsForDisplay(content, customProviders),
-    toolName = toolName.replaceCustomProviderIdsForDisplayOrNull(customProviders),
-    toolArgs = toolArgs.replaceCustomProviderIdsForDisplayOrNull(customProviders),
-    toolResult = toolResult.replaceCustomProviderIdsForDisplayOrNull(customProviders),
-    toolProgress = toolProgress.replaceCustomProviderIdsForDisplayOrNull(customProviders),
-    toolTarget = toolTarget.replaceCustomProviderIdsForDisplayOrNull(customProviders),
-    toolDisplayName = toolDisplayName.replaceCustomProviderIdsForDisplayOrNull(customProviders),
-    toolResultText = toolResultText.replaceCustomProviderIdsForDisplayOrNull(customProviders),
-    toolStructuredResult = toolStructuredResult.replaceCustomProviderIdsForDisplayOrNull(customProviders),
-)
+): MessageSegment {
+    if (type == "citation") return this
+    return copy(
+        content = replaceCustomProviderIdsForDisplay(content, customProviders),
+        toolName = toolName.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolArgs = toolArgs.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolResult = toolResult.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolProgress = toolProgress.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolTarget = toolTarget.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolDisplayName = toolDisplayName.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolResultText = toolResultText.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+        toolStructuredResult = toolStructuredResult.replaceCustomProviderIdsForDisplayOrNull(customProviders),
+    )
+}
 
 private fun AttachmentMeta.forDisplay(
     customProviders: List<CustomProviderConfig>,

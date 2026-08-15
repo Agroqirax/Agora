@@ -1,8 +1,12 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.model.CitationAnchor
+import com.newoether.agora.model.CitationPolicy
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.citationRecords
+import com.newoether.agora.model.toMessageSegment
 import com.newoether.agora.util.Constants
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -45,6 +49,32 @@ class UiMessageProjectionTest {
         assertEquals("Run shell", projected.toolCall?.displayName)
         assertEquals("workspace", projected.toolCall?.resultText)
         assertEquals("""{"path":"workspace"}""", projected.toolCall?.structuredResult)
+    }
+
+    @Test
+    fun roomHistoryReloadPreservesCitationSegments() {
+        val answer = "Claim"
+        val citation = requireNotNull(
+            CitationPolicy.create(
+                provider = "test",
+                kind = "web",
+                title = "Source",
+                url = "https://example.com/source",
+                anchors = listOf(CitationAnchor(0, answer.length, answer)),
+                answerText = answer,
+            ),
+        )
+        val segment = citation.toMessageSegment()
+        val entity = messageEntity(
+            id = "assistant",
+            text = answer,
+            toolCallJson = Json.encodeToString(listOf(segment)),
+        )
+
+        val projected = entity.toUiChatMessage { it }
+
+        assertEquals(listOf(segment), projected.segments)
+        assertEquals(citation, projected.citationRecords().single())
     }
 
     @Test

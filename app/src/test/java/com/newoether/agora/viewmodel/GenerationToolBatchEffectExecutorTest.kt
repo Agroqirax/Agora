@@ -2,9 +2,13 @@ package com.newoether.agora.viewmodel
 
 import com.newoether.agora.api.StreamEvent
 import com.newoether.agora.api.ToolDefinition
+import com.newoether.agora.model.CitationAnchor
+import com.newoether.agora.model.CitationPolicy
+import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.ToolExecutionStates
+import com.newoether.agora.model.citationRecords
 import com.newoether.agora.tool.ToolExecutionEvent
 import com.newoether.agora.tool.ToolExecutionResult
 import com.newoether.agora.tool.ToolPresentationMetadata
@@ -18,6 +22,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GenerationToolBatchEffectExecutorTest {
+    @Test
+    fun `malformed citation segments fail closed during overlay restore and append`() {
+        val overlay = GenerationToolOverlay(
+            presentation = object : GenerationToolPresentationSource {
+                override fun presentationMetadata(name: String) = null
+            },
+            providerName = "provider",
+        )
+        val answer = MessageSegment(type = "answer", content = "answer")
+        val malformed = MessageSegment(type = "citation", content = "{")
+
+        overlay.replaceAll(listOf(answer, malformed))
+        overlay.append(malformed)
+
+        assertEquals(listOf(answer), overlay.snapshot())
+    }
+
     @Test
     fun `overlay uniquely owns stream indices metadata and terminal presentation`() {
         val overlay = GenerationToolOverlay(
@@ -53,6 +74,54 @@ class GenerationToolBatchEffectExecutorTest {
 
         overlay.replaceAll(emptyList())
         assertNull(overlay.snapshot().singleOrNull())
+    }
+
+    @Test
+    fun `citation overlay preserves first source order and merges repeated terminal updates`() {
+        val overlay = GenerationToolOverlay(
+            presentation = object : GenerationToolPresentationSource {
+                override fun presentationMetadata(name: String) = null
+            },
+            providerName = "provider",
+        )
+        val answer = "Alpha Beta"
+        fun citation(
+            title: String,
+            url: String,
+            anchor: CitationAnchor? = null,
+        ) = requireNotNull(
+            CitationPolicy.create(
+                provider = "test",
+                kind = "web",
+                title = title,
+                url = url,
+                anchors = listOfNotNull(anchor),
+                answerText = answer,
+            ),
+        )
+        val firstInitial = citation("First", "https://example.com/first")
+        val second = citation(
+            "Second",
+            "https://example.com/second",
+            CitationAnchor(6, 10, "Beta"),
+        )
+        val firstFinal = citation(
+            "First",
+            "https://example.com/first",
+            CitationAnchor(0, 5, "Alpha"),
+        )
+
+        assertTrue(overlay.upsertCitation(firstInitial))
+        assertTrue(overlay.upsertCitation(second))
+        assertTrue(overlay.upsertCitation(firstFinal))
+        assertEquals(false, overlay.upsertCitation(firstFinal))
+
+        val snapshot = overlay.snapshot()
+        assertEquals(listOf("answer", "citation", "citation"), snapshot.map { it.type })
+        val citations = snapshot.citationRecords(answer)
+        assertEquals(listOf("First", "Second"), citations.map { it.title })
+        assertEquals(listOf(CitationAnchor(0, 5, "Alpha")), citations[0].anchors)
+        assertEquals(listOf(CitationAnchor(6, 10, "Beta")), citations[1].anchors)
     }
 
     @Test
