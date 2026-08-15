@@ -156,6 +156,7 @@
     <string name="tool_stopping_loop">正在停止循环…</string>
     <string name="tool_stopped_loop">已停止循环</string>
     <string name="thinking_ellipsis">思考中...</string>
+    <string name="thinking_for_seconds_ellipsis">已思考 %1$d 秒...</string>
     <string name="answering_ellipsis">回复中...</string>
     <string name="sending_ellipsis">发送中...</string>
     <string name="tool_calling_ellipsis">调用工具中...</string>
@@ -176,6 +177,7 @@
     <string name="citation_source_file">文件</string>
     <string name="citation_source_location">位置</string>
     <string name="generation_retry_attempt">重试 %1$d/%2$d</string>
+    <string name="select_text">选择文本</string>
 
     <!-- Settings - Main -->
     <string name="settings_title">设置</string>
@@ -186,7 +188,7 @@
     <string name="settings_models">模型</string>
     <string name="settings_models_desc">启用、禁用和配置 AI 模型</string>
     <string name="settings_generation">生成</string>
-    <string name="settings_generation_desc">LLM 参数和上下文窗口</string>
+    <string name="settings_generation_desc">LLM 参数</string>
     <string name="settings_web_search">网页搜索</string>
     <string name="settings_web_search_desc">为所有提供商配置网页搜索工具</string>
     <string name="settings_title_gen">标题生成</string>
@@ -1163,18 +1165,18 @@
     <string name="openai_service_tier_fast">快速</string>
     <string name="context_title">Context</string>
     <string name="context_desc">Context management</string>
-    <string name="context_compact">Context compact</string>
-    <string name="context_compact_auto">Automatic compact</string>
-    <string name="context_compact_auto_desc">Summarize older context before overflow</string>
-    <string name="context_compact_model">Compact model</string>
-    <string name="context_compact_prompt">Compact prompt</string>
-    <string name="context_compact_prompt_desc">Summary instructions</string>
-    <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact">上下文压缩</string>
+    <string name="context_compact_auto">自动压缩</string>
+    <string name="context_compact_auto_desc">在溢出前总结较早的上下文</string>
+    <string name="context_compact_model">压缩模型</string>
+    <string name="context_compact_prompt">压缩提示词</string>
+    <string name="context_compact_prompt_desc">总结指令</string>
+    <string name="context_compact_select_model">选择压缩模型</string>
     <string name="context_compact_threshold">自动压缩阈值</string>
     <string name="context_compact_threshold_desc">估算上下文达到所选窗口的此百分比时进行压缩</string>
-    <string name="context_compact_retain">Recent messages to keep</string>
+    <string name="context_compact_retain">要保留的最近消息</string>
     <string name="context_compact_retain_desc">每次压缩后按原文保留的消息</string>
-    <string name="context_compact_manual">Compact context</string>
+    <string name="context_compact_manual">压缩上下文</string>
     <string name="context_compacting">正在压缩上下文…</string>
     <string name="context_compact_select_available_model">请选择可用模型</string>
     <string name="context_compact_prompt_empty">压缩提示词不能为空</string>
@@ -1185,6 +1187,17 @@
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
     <string name="context_usage_messages">约 %1$s / %2$s tokens</string>
+    <string name="context_compact_streaming">正在压缩上下文…</string>
+    <string name="context_compact_error">压缩出错</string>
+    <string name="context_compact_stopped">压缩已停止</string>
+    <string name="context_compact_setup_unavailable">压缩设置不可用</string>
+    <string name="context_compact_setup_failed">压缩设置失败</string>
+    <string name="context_compact_not_ready_recompact">压缩消息尚不能重新压缩</string>
+    <string name="context_compact_boundary_disappeared">压缩边界已消失</string>
+    <string name="context_compact_wait_for_generation">请等待当前生成完成</string>
+    <string name="context_compact_generation_not_started">压缩生成未能启动</string>
+    <string name="context_compact_message_disappeared">压缩消息已消失</string>
+    <string name="context_compact_open_conversation">请先打开一个对话</string>
     <string name="context_boundary_active">压缩边界已启用</string>
     <string name="context_boundary_none">无压缩边界</string>
 
@@ -1233,5 +1246,29 @@
     <string name="developer_options_export_failed">无法创建诊断包。</string>
     <string name="responses_api">Responses API</string>
     <string name="responses_api_desc">使用提供商的 /responses 端点，而非 Chat Completions。</string>
-    <string name="context_compact_failed">Compact failed</string>
+    <string name="context_compact_failed">压缩失败</string>
+
+    <string name="generation_error_authentication">身份验证失败，请检查 API 密钥。</string>
+    <string name="generation_error_rate_limit">请求过于频繁，请稍后重试。</string>
+    <string name="generation_error_server">服务器错误（%1$d），服务可能暂时不可用。</string>
+    <string name="generation_error_network">网络错误：%1$s</string>
+    <string name="generation_error_network_http">网络错误（%1$d）：%2$s</string>
+    <string name="generation_error_sse_parse">无法读取服务器响应。</string>
+    <string name="generation_error_incomplete_stream">%1$s 提前结束了响应。未收到完成信号，因此回复不完整。</string>
+    <string name="generation_error_incomplete_tool_stream">%1$s 在工具调用仍在生成时提前结束了响应。未收到完成信号，因此回复不完整。</string>
+    <string name="generation_error_incomplete_stream_reason">%1$s 在停止原因为 %2$s 后提前结束了响应，且未收到完成信号。</string>
+    <string name="generation_error_incomplete_tool_stream_reason">%1$s 在工具调用仍在生成时因 %2$s 提前结束了响应。</string>
+    <string name="generation_error_output_truncated">响应达到输出 token 上限（%1$s），内容已被截断。</string>
+    <string name="generation_error_tool_execution">工具 %1$s 执行失败：%2$s</string>
+    <string name="generation_error_transcription">图像转录失败：%1$s</string>
+    <string name="generation_error_embedding">嵌入生成失败：%1$s</string>
+    <string name="generation_error_request_format">发送前请求校验失败（%1$s）：%2$s</string>
+    <string name="generation_error_cancelled">生成已取消。</string>
+    <string name="generation_error_timeout">请求超时。</string>
+    <string name="generation_error_unexpected">发生意外错误。</string>
+    <string name="generation_error_connection_closed">连接已关闭。</string>
+    <string name="generation_error_connection_refused">连接被拒绝。</string>
+    <string name="generation_error_connection_reset">连接已重置。</string>
+    <string name="generation_error_unknown_host">找不到主机。</string>
+    <string name="generation_error_tls_failure">安全连接失败。</string>
 </resources>

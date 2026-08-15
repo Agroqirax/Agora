@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.ui.theme.ChatType
 
+internal const val CHAT_DROPDOWN_MENU_ICON_SIZE_DP = 24
+
 fun Modifier.verticalScrollbar(
     scrollState: ScrollState,
     color: Color,
@@ -58,7 +60,7 @@ internal fun NativeSearchMenuItem(
                     painter = painterResource(R.drawable.provider_openai),
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp),
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(stringResource(R.string.openai_search))

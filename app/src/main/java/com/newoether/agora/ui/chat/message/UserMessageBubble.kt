@@ -3,6 +3,7 @@ package com.newoether.agora.ui.chat.message
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -16,7 +17,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Shape
 import com.newoether.agora.R
-import com.newoether.agora.util.NoAutoScrollSelectionContainer
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.ui.chat.AttachmentThumbnailItem
@@ -65,6 +65,7 @@ internal fun UserMessageBubble(
     onEdit: (String, String) -> Unit,
     onCancelEdit: () -> Unit,
     onStartEdit: () -> Unit,
+    onSelectText: () -> Unit,
     onSwitchBranch: (Int) -> Unit,
     onMediaClick: (List<String>, Int) -> Unit,
     onFileContentClick: ((fileName: String, content: String) -> Unit)?,
@@ -80,12 +81,23 @@ internal fun UserMessageBubble(
     var showMenu by remember { mutableStateOf(false) }
 
     Column(horizontalAlignment = Alignment.End) {
-        Surface(
+        Box {
+            Surface(
             shape = shape,
             color = backgroundColor,
             modifier = Modifier
                 .widthIn(max = 300.dp)
                 .then(contextAlpha)
+                .clip(shape)
+                .combinedClickable(
+                    enabled = !isEditing && showActions,
+                    hapticFeedbackEnabled = false,
+                    onClick = {},
+                    onLongClick = {
+                        haptics.longPress()
+                        showMenu = true
+                    },
+                )
                 // Keep size interpolation local to the stable user-bubble surface. Initial
                 // measurement is immediate; subsequent editor enter/exit changes animate
                 // without involving the message row or assistant streaming layout.
@@ -229,19 +241,92 @@ internal fun UserMessageBubble(
                         }
                     }
                     if (message.text.isNotEmpty()) {
-                        NoAutoScrollSelectionContainer {
-                            SearchHighlightedPlainText(
-                                text = message.text,
-                                style = ChatType.userBody,
-                                color = textColor,
-                                spec = searchHighlight,
-                            )
-                        }
+                        SearchHighlightedPlainText(
+                            text = message.text,
+                            style = ChatType.userBody,
+                            color = textColor,
+                            spec = searchHighlight,
+                        )
                     }
                 }
             }
         }
 
+            DropdownMenu(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 16.dp,
+                shape = RoundedCornerShape(12.dp),
+                expanded = showMenu && showActions && !isEditing,
+                onDismissRequest = { showMenu = false },
+            ) {
+                if (!actionCopyText.isNullOrBlank()) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.copy)) },
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(actionCopyText))
+                            haptics.confirm()
+                            showMenu = false
+                        },
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.edit)) },
+                    onClick = {
+                        showMenu = false
+                        onStartEdit()
+                    },
+                    enabled = isEditingAllowed,
+                    leadingIcon = { Icon(Icons.Default.Edit, null) },
+                )
+                if (message.text.isNotBlank()) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.select_text)) },
+                        onClick = {
+                            showMenu = false
+                            onSelectText()
+                        },
+                        leadingIcon = { Icon(Icons.Default.SelectAll, null) },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.info)) },
+                    onClick = {
+                        showMenu = false
+                        onShowInfo()
+                    },
+                    leadingIcon = { Icon(Icons.Default.Info, null) },
+                )
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(R.string.delete),
+                            color = if (!isLoading) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                            },
+                        )
+                    },
+                    onClick = {
+                        showMenu = false
+                        onShowDelete()
+                    },
+                    enabled = !isLoading,
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Delete,
+                            null,
+                            tint = if (!isLoading) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                            },
+                        )
+                    },
+                )
+            }
+        }
         if (showBranchSelector && totalBranches > 1 && !isEditing) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -262,44 +347,6 @@ internal fun UserMessageBubble(
             }
         }
 
-        if (!isEditing && showActions) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.then(contextAlpha)
-            ) {
-                if (!actionCopyText.isNullOrBlank()) {
-                    IconButton(onClick = { clipboardManager.setText(AnnotatedString(actionCopyText)); haptics.confirm() }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.copy), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                    }
-                }
-                IconButton(onClick = onStartEdit, enabled = isEditingAllowed, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.edit), modifier = Modifier.size(16.dp), tint = LocalContentColor.current.copy(alpha = if (isEditingAllowed) 0.6f else 0.3f))
-                }
-                Box {
-                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more), modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                    }
-                    DropdownMenu(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        tonalElevation = 16.dp,
-                        shape = RoundedCornerShape(12.dp),
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.info)) },
-                            onClick = { showMenu = false; onShowInfo() },
-                            leadingIcon = { Icon(Icons.Default.Info, null) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.delete), color = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
-                            onClick = { showMenu = false; onShowDelete() },
-                            enabled = !isLoading,
-                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) }
-                        )
-                    }
-                }
-            }
-        }
+
     }
 }

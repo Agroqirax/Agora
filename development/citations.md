@@ -131,10 +131,12 @@ ordinary Unicode text or standard Markdown links.
   primary labels are bounded with ellipsis without clipping the grouped suffix or changing surrounding
   Markdown/message layout. A single-source inline capsule measures only its rendered primary label
   plus symmetric padding; suffix gap and `+N` width exist only when additional sources exist. Every
-  inline capsule also owns a transparent 2 dp outer gap on each side, included in its stable
-  placeholder width. The Sources summary capsule has a 36 dp minimum height, 16 dp horizontal padding,
-  8 dp vertical padding,
-  and semibold `labelLarge` text.
+  inline capsule uses 11 sp / 12 sp SemiBold text, a 22 sp placeholder height, 7 dp inner
+  horizontal padding per side (14 dp total), and a transparent 2 dp outer gap on each side included
+  in its stable placeholder width. The primary-label cap is 84 dp and a grouped suffix remains
+  separated by 4 dp. The Sources summary capsule has a 36 dp minimum height, 16 dp horizontal padding,
+  8 dp vertical padding, one 18 dp Link icon before the dynamic count with an 8 dp gap, and semibold
+  `labelLarge` text. Icon and text share the existing capsule foreground color.
 - Inline/group, summary, numbered-source containers, and bottom-sheet source rows own a draw-only fade
   from alpha `0f` to `1f` over 320 ms with `LinearEasing`. The fade adds no scale, translation, delayed
   data, hidden click target, remeasurement, or message-height change. Stable message/source/group
@@ -154,9 +156,10 @@ ordinary Unicode text or standard Markdown links.
   independent Markdown blocks.
 - The always-visible `Sources` section below answer content is prohibited. When and only when the
   bottom message action controls are visible, show one left-aligned native Compose summary capsule
-  immediately above them with dynamic text `${sourceCount} Sources`.
+  immediately above them with an 18 dp Link icon, 8 dp gap, and dynamic text `${sourceCount} Sources`.
 - Activating the summary capsule opens the one shared Sources bottom sheet containing every
-  deduplicated source in first-source order and titled exactly `N Sources`. Activating a grouped
+  deduplicated source in first-source order and titled exactly `N Sources`, without emitting haptic
+  feedback. Activating a grouped
   inline capsule opens the same component with only that ordered group and the same exact dynamic
   title. The title uses `ChatType.detailTitle`, matching the thinking-segment bottom sheet. Activating
   a single-source inline capsule retains direct safe-URL or non-URL detail behavior. Every sheet

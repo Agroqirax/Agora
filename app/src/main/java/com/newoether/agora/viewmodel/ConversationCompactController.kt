@@ -77,23 +77,23 @@ internal class ConversationCompactController(
         request: CompactRequest,
         state: ConversationGenerationState,
     ): CompactResult {
-        if (request.model.isBlank()) return CompactResult.Failed("Select a compact model")
-        if (request.prompt.isBlank()) return CompactResult.Failed("Compact prompt cannot be empty")
+        if (request.model.isBlank()) return CompactResult.Failed(CompactFailureReason.SELECT_MODEL)
+        if (request.prompt.isBlank()) return CompactResult.Failed(CompactFailureReason.EMPTY_PROMPT)
         if (request.retainLogicalMessages < 0) {
-            return CompactResult.Failed("Retained messages cannot be negative")
+            return CompactResult.Failed(CompactFailureReason.INVALID_RETAIN_COUNT)
         }
         val snapshotRunId = "compact_preflight_${UUID.randomUUID()}"
         val snapshot = try {
             val builder = requestBuilder
-                ?: return CompactResult.Failed("Compact setup is unavailable")
+                ?: return CompactResult.Failed(CompactFailureReason.SETUP_UNAVAILABLE)
             builder.captureAdmissionSnapshot(
                 conversationId = conversationId,
                 runId = snapshotRunId,
                 modelId = request.model,
             ).forCompact(request)
-        } catch (error: Exception) {
+        } catch (_: Exception) {
             return CompactResult.Failed(
-                error.message?.takeIf(String::isNotBlank) ?: "Compact setup failed",
+                CompactFailureReason.SETUP_FAILED,
             )
         }
         return launch(
@@ -138,7 +138,7 @@ internal class ConversationCompactController(
             targetMessage
                 ?.let { loadedMessages.find { entity -> entity.id == it.id } }
                 ?: return null to CompactResult.Failed(
-                    "Compact message is not ready to recompact",
+                    CompactFailureReason.NOT_READY_TO_RECOMPACT,
                 )
         }
         val parent = target?.parentId
@@ -147,7 +147,7 @@ internal class ConversationCompactController(
                 ?.let { selected -> loadedMessages.find { it.id == selected.id } }
             ?: return null to CompactResult.NotNeeded
         if (target != null && target.parentId != parent.id) {
-            return null to CompactResult.Failed("Compact boundary disappeared")
+            return null to CompactResult.Failed(CompactFailureReason.BOUNDARY_DISAPPEARED)
         }
 
         val generationSnapshot = snapshot.forCompact(request)
@@ -177,11 +177,11 @@ internal class ConversationCompactController(
                 transformFinalText = transform,
             ),
             state,
-        ) ?: return null to CompactResult.Failed("Wait for the current generation to finish")
+        ) ?: return null to CompactResult.Failed(CompactFailureReason.GENERATION_BUSY)
 
         if (!launched.started.await()) {
             launched.job.join()
-            return null to CompactResult.Failed("Compact generation did not start")
+            return null to CompactResult.Failed(CompactFailureReason.GENERATION_NOT_STARTED)
         }
         onCompactStarted(conversationId, messageId)
         val compactLaunch = StandardCompactLaunch(messageId, launched.job)
@@ -194,22 +194,25 @@ internal class ConversationCompactController(
         }
         val settled = conversations.getMessagesForConversationSnapshot(conversationId)
             .find { it.id == messageId }
-            ?: return compactLaunch to CompactResult.Failed("Compact message disappeared")
+            ?: return compactLaunch to CompactResult.Failed(CompactFailureReason.MESSAGE_DISAPPEARED)
         val result = when (settled.status) {
             MessageStatus.SUCCESS -> CompactResult.Created(messageId)
             MessageStatus.STOPPED -> CompactResult.Stopped(messageId)
             MessageStatus.ERROR -> CompactResult.Failed(
-                settled.toUiChatMessage { text -> text }
+                reason = CompactFailureReason.GENERIC,
+                externalDetail = settled.toUiChatMessage { text -> text }
                     .segments
                     .orEmpty()
                     .lastOrNull { segment ->
                         segment.type == "error" && segment.content.isNotBlank()
                     }
-                    ?.content
-                    ?: "Context compact failed",
-                messageId,
+                    ?.content,
+                messageId = messageId,
             )
-            else -> CompactResult.Failed("Context compact failed", messageId)
+            else -> CompactResult.Failed(
+                reason = CompactFailureReason.GENERIC,
+                messageId = messageId,
+            )
         }
         return compactLaunch to result
     }

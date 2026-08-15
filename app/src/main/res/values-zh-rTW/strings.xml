@@ -65,6 +65,7 @@
     <string name="conversation_unread_generation">未讀的新回覆</string>
     <string name="new_chat">新對話</string>
     <string name="thinking_ellipsis">思考中…</string>
+    <string name="thinking_for_seconds_ellipsis">已思考 %1$d 秒…</string>
     <string name="answering_ellipsis">回覆中…</string>
     <string name="sending_ellipsis">傳送中…</string>
     <string name="tool_calling_ellipsis">呼叫工具中…</string>
@@ -85,6 +86,7 @@
     <string name="citation_source_file">檔案</string>
     <string name="citation_source_location">位置</string>
     <string name="generation_retry_attempt">重試 %1$d/%2$d</string>
+    <string name="select_text">選取文字</string>
 
     <!-- Settings - Main -->
     <string name="settings_title">設定</string>
@@ -95,7 +97,7 @@
     <string name="settings_models">模型</string>
     <string name="settings_models_desc">啟用、停用和設定 AI 模型</string>
     <string name="settings_generation">生成</string>
-    <string name="settings_generation_desc">LLM 參數和上下文視窗</string>
+    <string name="settings_generation_desc">LLM 參數</string>
     <string name="settings_web_search">網頁搜尋</string>
     <string name="settings_web_search_desc">為所有服務商設定網頁搜尋工具</string>
     <string name="settings_title_gen">標題生成</string>
@@ -1071,19 +1073,19 @@
     <string name="openai_service_tier_fast">快速</string>
     <string name="context_title">Context</string>
     <string name="context_desc">Context management</string>
-    <string name="context_compact">Context compact</string>
-    <string name="context_compact_auto">Automatic compact</string>
-    <string name="context_compact_auto_desc">Summarize older context before overflow</string>
-    <string name="context_compact_model">Compact model</string>
-    <string name="context_compact_prompt">Compact prompt</string>
-    <string name="context_compact_prompt_desc">Summary instructions</string>
-    <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact">內容壓縮</string>
+    <string name="context_compact_auto">自動壓縮</string>
+    <string name="context_compact_auto_desc">在溢出前總結較早的內容</string>
+    <string name="context_compact_model">壓縮模型</string>
+    <string name="context_compact_prompt">壓縮提示詞</string>
+    <string name="context_compact_prompt_desc">總結指示</string>
+    <string name="context_compact_select_model">選擇壓縮模型</string>
     <string name="context_compact_threshold">自動壓縮閾值</string>
     <string name="context_compact_threshold_desc">估算內容達到所選視窗的此百分比時進行壓縮</string>
-    <string name="context_compact_retain">Recent messages to keep</string>
+    <string name="context_compact_retain">要保留的最近訊息</string>
     <string name="context_compact_retain_desc">每次壓縮後按原文保留的訊息</string>
-    <string name="context_compact_manual">Compact context</string>
-    <string name="context_compacting">正在壓縮上下文…</string>
+    <string name="context_compact_manual">壓縮內容</string>
+    <string name="context_compacting">正在壓縮內容…</string>
     <string name="context_compact_select_available_model">請選擇可用模型</string>
     <string name="context_compact_prompt_empty">壓縮提示詞不能為空</string>
     <string name="context_compact_retain_invalid">請輸入有效的保留訊息數</string>
@@ -1093,6 +1095,17 @@
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
     <string name="context_usage_messages">約 %1$s / %2$s tokens</string>
+    <string name="context_compact_streaming">正在壓縮內容…</string>
+    <string name="context_compact_error">壓縮出錯</string>
+    <string name="context_compact_stopped">壓縮已停止</string>
+    <string name="context_compact_setup_unavailable">壓縮設定不可用</string>
+    <string name="context_compact_setup_failed">壓縮設定失敗</string>
+    <string name="context_compact_not_ready_recompact">壓縮訊息尚不能重新壓縮</string>
+    <string name="context_compact_boundary_disappeared">壓縮邊界已消失</string>
+    <string name="context_compact_wait_for_generation">請等待目前的生成完成</string>
+    <string name="context_compact_generation_not_started">壓縮生成未能啟動</string>
+    <string name="context_compact_message_disappeared">壓縮訊息已消失</string>
+    <string name="context_compact_open_conversation">請先開啟一個對話</string>
     <string name="context_boundary_active">壓縮邊界已啟用</string>
     <string name="context_boundary_none">無壓縮邊界</string>
 
@@ -1141,5 +1154,29 @@
     <string name="developer_options_export_failed">無法建立診斷套件。</string>
     <string name="responses_api">Responses API</string>
     <string name="responses_api_desc">使用供應商的 /responses 端點，而非 Chat Completions。</string>
-    <string name="context_compact_failed">Compact failed</string>
+    <string name="context_compact_failed">壓縮失敗</string>
+
+    <string name="generation_error_authentication">驗證失敗，請檢查 API 金鑰。</string>
+    <string name="generation_error_rate_limit">請求過於頻繁，請稍後再試。</string>
+    <string name="generation_error_server">伺服器錯誤（%1$d），服務可能暫時無法使用。</string>
+    <string name="generation_error_network">網路錯誤：%1$s</string>
+    <string name="generation_error_network_http">網路錯誤（%1$d）：%2$s</string>
+    <string name="generation_error_sse_parse">無法讀取伺服器回應。</string>
+    <string name="generation_error_incomplete_stream">%1$s 提前結束回應。未收到完成訊號，因此回覆不完整。</string>
+    <string name="generation_error_incomplete_tool_stream">%1$s 在工具呼叫仍在寫入時提前結束回應。未收到完成訊號，因此回覆不完整。</string>
+    <string name="generation_error_incomplete_stream_reason">%1$s 在停止原因為 %2$s 後提前結束回應，且未收到完成訊號。</string>
+    <string name="generation_error_incomplete_tool_stream_reason">%1$s 在工具呼叫仍在寫入時因 %2$s 提前結束回應。</string>
+    <string name="generation_error_output_truncated">回應達到輸出 token 上限（%1$s），內容已被截斷。</string>
+    <string name="generation_error_tool_execution">工具 %1$s 執行失敗：%2$s</string>
+    <string name="generation_error_transcription">圖片轉錄失敗：%1$s</string>
+    <string name="generation_error_embedding">嵌入產生失敗：%1$s</string>
+    <string name="generation_error_request_format">傳送前請求驗證失敗（%1$s）：%2$s</string>
+    <string name="generation_error_cancelled">產生已取消。</string>
+    <string name="generation_error_timeout">請求逾時。</string>
+    <string name="generation_error_unexpected">發生未預期的錯誤。</string>
+    <string name="generation_error_connection_closed">連線已關閉。</string>
+    <string name="generation_error_connection_refused">連線遭拒。</string>
+    <string name="generation_error_connection_reset">連線已重設。</string>
+    <string name="generation_error_unknown_host">找不到主機。</string>
+    <string name="generation_error_tls_failure">安全連線失敗。</string>
 </resources>

@@ -321,8 +321,13 @@ class CitationMessageContentTest {
         assertEquals(36, CITATION_SOURCES_SUMMARY_MIN_HEIGHT_DP)
         assertEquals(16, CITATION_SOURCES_SUMMARY_HORIZONTAL_PADDING_DP)
         assertEquals(8, CITATION_SOURCES_SUMMARY_VERTICAL_PADDING_DP)
-        assertEquals(168, CITATION_INLINE_PRIMARY_MAX_WIDTH_DP)
-        assertEquals(12, CITATION_INLINE_HORIZONTAL_PADDING_DP)
+        assertEquals(18, CITATION_SOURCES_SUMMARY_ICON_SIZE_DP)
+        assertEquals(8, CITATION_SOURCES_SUMMARY_ICON_GAP_DP)
+        assertEquals(84, CITATION_INLINE_PRIMARY_MAX_WIDTH_DP)
+        assertEquals(14, CITATION_INLINE_HORIZONTAL_PADDING_DP)
+        assertEquals(11, CITATION_INLINE_FONT_SIZE_SP)
+        assertEquals(12, CITATION_INLINE_LINE_HEIGHT_SP)
+        assertEquals(22, CITATION_INLINE_PLACEHOLDER_HEIGHT_SP)
         assertEquals(4, CITATION_INLINE_SUFFIX_GAP_DP)
         assertEquals(2, CITATION_INLINE_OUTER_SPACER_DP)
         assertEquals(50, CITATION_SOURCE_ROW_SHAPE_PERCENT)
@@ -331,34 +336,34 @@ class CitationMessageContentTest {
     @Test
     fun singleInlinePlaceholderReservesOnlyApprovedOuterSpacingWithoutSuffixSpace() {
         assertEquals(
-            76,
+            78,
             citationInlinePlaceholderWidthPx(
                 primaryTextWidthPx = 60,
                 suffixTextWidthPx = null,
                 primaryMaxWidthPx = 168,
-                horizontalPaddingPx = 12,
+                horizontalPaddingPx = 14,
                 suffixGapPx = 4,
                 outerSpacingEachSidePx = 2,
             ),
         )
         assertEquals(
-            92,
+            94,
             citationInlinePlaceholderWidthPx(
                 primaryTextWidthPx = 60,
                 suffixTextWidthPx = 12,
                 primaryMaxWidthPx = 168,
-                horizontalPaddingPx = 12,
+                horizontalPaddingPx = 14,
                 suffixGapPx = 4,
                 outerSpacingEachSidePx = 2,
             ),
         )
         assertEquals(
-            184,
+            186,
             citationInlinePlaceholderWidthPx(
                 primaryTextWidthPx = 400,
                 suffixTextWidthPx = null,
                 primaryMaxWidthPx = 168,
-                horizontalPaddingPx = 12,
+                horizontalPaddingPx = 14,
                 suffixGapPx = 4,
                 outerSpacingEachSidePx = 2,
             ),

@@ -131,6 +131,11 @@ internal fun buildCitationAwareMarkdownAnnotatedString(
     return annotated.replaceCitationInlineTokens(citationTokens)
 }
 
+private const val MARKDOWN_LINE_HEIGHT_MULTIPLIER = 1.1f
+
+internal fun scaledMarkdownTextStyle(style: TextStyle): TextStyle = style.copy(
+    lineHeight = style.lineHeight * MARKDOWN_LINE_HEIGHT_MULTIPLIER,
+)
 @Composable
 internal fun rememberChatMarkdownAssets(
     textColor: Color,
@@ -143,44 +148,44 @@ internal fun rememberChatMarkdownAssets(
     // Outfit's large x-height means 15sp reads like ~16sp Roboto.
     // Heading steps of 3sp (h1→h2→h3) and 2sp (h3→h4) create
     // a visible but not jarring hierarchy during long-form reading.
+    val markdownBodyStyle = scaledMarkdownTextStyle(ChatType.body)
+    val thoughtMarkdownBodyStyle = scaledMarkdownTextStyle(ChatType.thoughtBody)
     val customTypography = markdownTypography(
-        text = ChatType.body,
-        paragraph = ChatType.body,
-        ordered = ChatType.body,
-        bullet = ChatType.body,
-        list = ChatType.body,
-        h1 = ChatType.mdH1,
-        h2 = ChatType.mdH2,
-        h3 = ChatType.mdH3,
-        h4 = ChatType.mdH4,
-        h5 = ChatType.mdH5,
-        h6 = ChatType.mdH6,
-        code = ChatType.code,
-        inlineCode = ChatType.code,
+        text = markdownBodyStyle,
+        paragraph = markdownBodyStyle,
+        ordered = markdownBodyStyle,
+        bullet = markdownBodyStyle,
+        list = markdownBodyStyle,
+        h1 = scaledMarkdownTextStyle(ChatType.mdH1),
+        h2 = scaledMarkdownTextStyle(ChatType.mdH2),
+        h3 = scaledMarkdownTextStyle(ChatType.mdH3),
+        h4 = scaledMarkdownTextStyle(ChatType.mdH4),
+        h5 = scaledMarkdownTextStyle(ChatType.mdH5),
+        h6 = scaledMarkdownTextStyle(ChatType.mdH6),
+        code = scaledMarkdownTextStyle(ChatType.code),
+        inlineCode = scaledMarkdownTextStyle(ChatType.code),
         textLink = linkTextStyles,
-        table = ChatType.body,
+        table = markdownBodyStyle,
     )
 
-    // Compact typography for thought blocks — subordinate to main chat body.
-    // One tier below main markdown: body at 13sp (vs 15sp), headings similarly
-    // stepped down. Readable for paragraph-level content but clearly secondary.
+    // Thought markdown keeps its subordinate font sizes while sharing the 1.1x rhythm.
     val thoughtTypography = markdownTypography(
-        text = ChatType.thoughtBody,
-        paragraph = ChatType.thoughtBody,
-        ordered = ChatType.thoughtBody,
-        bullet = ChatType.thoughtBody,
-        list = ChatType.thoughtBody,
-        h1 = ChatType.thH1,
-        h2 = ChatType.thH2,
-        h3 = ChatType.thH3,
-        h4 = ChatType.thH4,
-        h5 = ChatType.thH5,
-        h6 = ChatType.thH6,
-        code = ChatType.thoughtCode,
-        inlineCode = ChatType.thoughtCode,
+        text = thoughtMarkdownBodyStyle,
+        paragraph = thoughtMarkdownBodyStyle,
+        ordered = thoughtMarkdownBodyStyle,
+        bullet = thoughtMarkdownBodyStyle,
+        list = thoughtMarkdownBodyStyle,
+        h1 = scaledMarkdownTextStyle(ChatType.thH1),
+        h2 = scaledMarkdownTextStyle(ChatType.thH2),
+        h3 = scaledMarkdownTextStyle(ChatType.thH3),
+        h4 = scaledMarkdownTextStyle(ChatType.thH4),
+        h5 = scaledMarkdownTextStyle(ChatType.thH5),
+        h6 = scaledMarkdownTextStyle(ChatType.thH6),
+        code = scaledMarkdownTextStyle(ChatType.thoughtCode),
+        inlineCode = scaledMarkdownTextStyle(ChatType.thoughtCode),
         textLink = linkTextStyles,
+        table = thoughtMarkdownBodyStyle,
     )
-
     val fg = MaterialTheme.colorScheme.onBackground
     val bg = MaterialTheme.colorScheme.surface
     // Composite fg at 0.1 alpha over bg to produce the exact opaque equivalent
@@ -386,7 +391,7 @@ internal fun rememberChatMarkdownAssets(
             annotator = literalHtmlMarkdownAnnotator,
             imageTransformer = latexImageTransformer,
             flavour = markdownFlavour,
-            plainTextStyle = ChatType.body,
+            plainTextStyle = markdownBodyStyle,
             parseInlineDollarMath = parseInlineDollarMath,
         )
     }
@@ -407,7 +412,7 @@ internal fun rememberChatMarkdownAssets(
             annotator = literalHtmlMarkdownAnnotator,
             imageTransformer = latexImageTransformer,
             flavour = markdownFlavour,
-            plainTextStyle = ChatType.thoughtBody,
+            plainTextStyle = thoughtMarkdownBodyStyle,
             parseInlineDollarMath = parseInlineDollarMath,
         )
     }

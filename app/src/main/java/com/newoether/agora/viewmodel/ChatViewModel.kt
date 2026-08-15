@@ -887,9 +887,9 @@ class ChatViewModel(
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                CompactResult.Failed("Context compact failed")
+                CompactResult.Failed(CompactFailureReason.GENERIC)
             }
-            if (result is CompactResult.Failed) emitSnackbar(result.message)
+            if (result is CompactResult.Failed) emitSnackbar(compactFailureMessage(appContext, result))
         }
     }
 
@@ -910,9 +910,9 @@ class ChatViewModel(
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                CompactResult.Failed("Context compact failed")
+                CompactResult.Failed(CompactFailureReason.GENERIC)
             }
-            if (result is CompactResult.Failed) emitSnackbar(result.message)
+            if (result is CompactResult.Failed) emitSnackbar(compactFailureMessage(appContext, result))
         }
     }
 

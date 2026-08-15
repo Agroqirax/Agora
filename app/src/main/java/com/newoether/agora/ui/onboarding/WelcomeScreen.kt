@@ -8,11 +8,14 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.rememberScrollState
@@ -69,6 +72,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -553,31 +557,85 @@ fun WelcomeScreen(
                 }
 
                 // Continue / Get Started
-                Box(Modifier.fillMaxWidth().padding(horizontal = 32.dp).padding(bottom = 48.dp).navigationBarsPadding().alpha(contentAlpha)) {
+                val continueInteractionSource = remember { MutableInteractionSource() }
+                val isContinuePressed by continueInteractionSource.collectIsPressedAsState()
+                val pressed = isContinuePressed && motionPolicy.allowSpatialTransitions
+                val horizontalInset by animateDpAsState(
+                    targetValue = if (pressed) 12.dp else 32.dp,
+                    animationSpec = if (motionPolicy.allowSpatialTransitions) {
+                        spring(stiffness = 400f, dampingRatio = 0.25f)
+                    } else {
+                        snap()
+                    },
+                    label = "onboardingActionInset",
+                )
+                val actionHeight by animateDpAsState(
+                    targetValue = if (pressed) 56.dp else 48.dp,
+                    animationSpec = if (motionPolicy.allowSpatialTransitions) {
+                        spring(stiffness = 400f, dampingRatio = 0.25f)
+                    } else {
+                        snap()
+                    },
+                    label = "onboardingActionHeight",
+                )
+                val contentScale by animateFloatAsState(
+                    targetValue = if (pressed) 1.1f else 1f,
+                    animationSpec = if (motionPolicy.allowSpatialTransitions) {
+                        spring(stiffness = 400f, dampingRatio = 0.25f)
+                    } else {
+                        snap()
+                    },
+                    label = "onboardingActionContentScale",
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 48.dp)
+                        .navigationBarsPadding()
+                        .alpha(contentAlpha),
+                ) {
                     val last = pagerState.currentPage == pages.size - 1
-                    Button(onClick = {
-                        if (last) { exiting = true }
-                        else {
-                            // Credentials are saved by the page-leave effect (covers both
-                            // swipe and this button), so we only advance here.
-                            if (pagerState.currentPage == PAGE_PROVIDER && selectedProvider != null && selectedProvider != Constants.PROVIDER_LOCAL) apiKeyText = ""
-                            scope.launch {
-                                val targetPage = pagerState.currentPage + 1
-                                if (motionPolicy.allowProgrammaticScrollMotion) {
-                                    pagerState.animateScrollToPage(
-                                        targetPage,
-                                        animationSpec = tween<Float>(
-                                            500,
-                                            easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f),
-                                        ),
-                                    )
-                                } else {
-                                    pagerState.scrollToPage(targetPage)
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Button(
+                            onClick = {
+                                if (last) { exiting = true }
+                                else {
+                                    // Credentials are saved by the page-leave effect (covers both
+                                    // swipe and this button), so we only advance here.
+                                    if (pagerState.currentPage == PAGE_PROVIDER && selectedProvider != null && selectedProvider != Constants.PROVIDER_LOCAL) apiKeyText = ""
+                                    scope.launch {
+                                        val targetPage = pagerState.currentPage + 1
+                                        if (motionPolicy.allowProgrammaticScrollMotion) {
+                                            pagerState.animateScrollToPage(
+                                                targetPage,
+                                                animationSpec = tween<Float>(
+                                                    500,
+                                                    easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f),
+                                                ),
+                                            )
+                                        } else {
+                                            pagerState.scrollToPage(targetPage)
+                                        }
+                                    }
                                 }
-                            }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = horizontalInset)
+                                .height(actionHeight),
+                            interactionSource = continueInteractionSource,
+                            shape = RoundedCornerShape(50),
+                            enabled = showContent,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        ) {
+                            Text(
+                                if (last) stringResource(R.string.onboarding_get_started) else stringResource(R.string.onboarding_continue),
+                                modifier = Modifier.scale(contentScale),
+                            )
                         }
-                    }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(50), enabled = showContent, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
-                        Text(if (last) stringResource(R.string.onboarding_get_started) else stringResource(R.string.onboarding_continue), modifier = Modifier.padding(vertical = 4.dp))
                     }
                 }
             }

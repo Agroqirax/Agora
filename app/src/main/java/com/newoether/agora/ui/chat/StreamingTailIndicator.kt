@@ -210,7 +210,6 @@ internal fun StreamingTailIndicator(
     visible: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val allowContinuousMotion = LocalAgoraMotionPolicy.current.allowContinuousMotion
     val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     val density = LocalDensity.current
     val visualLiftPx = with(density) { StreamingTailVisualLift.toPx() }
@@ -243,33 +242,42 @@ internal fun StreamingTailIndicator(
                 fadeOut(tween(320, easing = FastOutSlowInEasing))
             },
         ) {
-            val breathingScale = if (allowContinuousMotion) {
-                val breathing = rememberInfiniteTransition(label = "StreamingTailBreathing")
-                val animatedScale by breathing.animateFloat(
-                    initialValue = 0.55f,
-                    targetValue = 1.30f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(1_000, easing = FastOutSlowInEasing),
-                        repeatMode = RepeatMode.Reverse,
-                    ),
-                    label = "StreamingTailBreathingScale",
-                )
-                animatedScale
-            } else {
-                1f
-            }
-            Box(
-                modifier = Modifier
-                    .size(11.dp)
-                    .graphicsLayer {
-                        scaleX = breathingScale
-                        scaleY = breathingScale
-                    }
-                    .background(
-                        color = MaterialTheme.colorScheme.onBackground,
-                        shape = CircleShape,
-                    ),
-            )
+            GenerationActivityDot()
         }
     }
+}
+
+/** The one breathing generation dot shared by the answer tail and pre-output activity gap. */
+@Composable
+internal fun GenerationActivityDot(
+    modifier: Modifier = Modifier,
+) {
+    val allowContinuousMotion = LocalAgoraMotionPolicy.current.allowContinuousMotion
+    val breathingScale = if (allowContinuousMotion) {
+        val breathing = rememberInfiniteTransition(label = "GenerationActivityBreathing")
+        val animatedScale by breathing.animateFloat(
+            initialValue = 0.55f,
+            targetValue = 1.30f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1_000, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "GenerationActivityBreathingScale",
+        )
+        animatedScale
+    } else {
+        1f
+    }
+    Box(
+        modifier = modifier
+            .size(11.dp)
+            .graphicsLayer {
+                scaleX = breathingScale
+                scaleY = breathingScale
+            }
+            .background(
+                color = MaterialTheme.colorScheme.onBackground,
+                shape = CircleShape,
+            ),
+    )
 }

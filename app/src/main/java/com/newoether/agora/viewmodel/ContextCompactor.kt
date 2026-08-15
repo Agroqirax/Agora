@@ -85,12 +85,28 @@ internal fun buildPersistedCompactText(
     }
 }
 
+enum class CompactFailureReason {
+    SELECT_MODEL,
+    EMPTY_PROMPT,
+    INVALID_RETAIN_COUNT,
+    SETUP_UNAVAILABLE,
+    SETUP_FAILED,
+    NOT_READY_TO_RECOMPACT,
+    BOUNDARY_DISAPPEARED,
+    GENERATION_BUSY,
+    GENERATION_NOT_STARTED,
+    MESSAGE_DISAPPEARED,
+    OPEN_CONVERSATION,
+    GENERIC,
+}
+
 sealed interface CompactResult {
     data class Created(val messageId: String) : CompactResult
     data class Stopped(val messageId: String) : CompactResult
     data object NotNeeded : CompactResult
     data class Failed(
-        val message: String,
+        val reason: CompactFailureReason,
+        val externalDetail: String? = null,
         val messageId: String? = null,
     ) : CompactResult
 }

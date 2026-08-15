@@ -58,6 +58,14 @@ class GenerationStreamingSegmentsTest {
     }
 
     @Test
+    fun `provider pass finish stops live thinking before publishing final duration`() {
+        assertEquals(MessageStatus.SENDING, statusAfterThoughtPhaseFinished(MessageStatus.THINKING))
+        assertEquals(MessageStatus.SENDING, statusAfterThoughtPhaseFinished(MessageStatus.SENDING))
+        assertEquals(MessageStatus.ERROR, statusAfterThoughtPhaseFinished(MessageStatus.ERROR))
+        assertEquals(MessageStatus.STOPPED, statusAfterThoughtPhaseFinished(MessageStatus.STOPPED))
+    }
+
+    @Test
     fun `final snapshot preserves the terminal message projection`() {
         val oversized = "x".repeat(2_000_000)
         val snapshot = GenerationFinalSnapshot(

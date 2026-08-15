@@ -112,6 +112,7 @@ Never:
 | Provider structured citations, citation persistence, marker cleanup, answer/source projection, citation copy/search/import/export, or citation accessibility | [citations.md](citations.md) |
 | Embedding-cache reads, semantic conversation search, RAG ranking, or search eligibility | [semantic-search.md](semantic-search.md) |
 | Generic Web Search providers/settings/tool execution or native provider-hosted web search | [web-search.md](web-search.md) |
+| Application-level onboarding motion, settings category copy, or other non-message global UI behavior | [application-ui.md](application-ui.md) |
 
 Add a module document when a user defines durable behavior for another subsystem. Each module
 document must describe current code ownership, allowed and forbidden responsibilities, concrete

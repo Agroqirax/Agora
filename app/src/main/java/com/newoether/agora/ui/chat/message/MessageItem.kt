@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.R
 import com.newoether.agora.data.forDisplay
 import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.model.ChatMessage
@@ -49,9 +50,7 @@ import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.mikepenz.markdown.compose.components.markdownComponents
 import kotlinx.coroutines.flow.StateFlow
 
-private const val CompactStreamingStatusText = "Context compacting..."
-private const val CompactErrorText = "Compact error"
-private const val CompactStoppedText = "Compact stopped"
+
 
 internal enum class ContextCompactPillPresentation {
     IN_PROGRESS,
@@ -141,6 +140,7 @@ internal fun MessageItem(
     var selectedSegmentIndex by remember { mutableIntStateOf(-1) }
     var selectedSegmentIndices by remember { mutableStateOf<List<Int>>(emptyList()) }
     var showInfoDialog by remember { mutableStateOf(false) }
+    var showUserTextSelection by remember(message.id) { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showCompactDetail by remember(message.id) { mutableStateOf(false) }
     val haptics = LocalAgoraHaptics.current
@@ -307,6 +307,7 @@ internal fun MessageItem(
                         onEdit = onEdit,
                         onCancelEdit = onCancelEdit,
                         onStartEdit = onStartEdit,
+                        onSelectText = { showUserTextSelection = true },
                         onSwitchBranch = onSwitchBranch,
                         onMediaClick = onMediaClick,
                         onFileContentClick = onFileContentClick,
@@ -386,6 +387,19 @@ internal fun MessageItem(
         )?.errorText
     }
 
+    if (showUserTextSelection) {
+        SegmentDetailSheet(
+            message = displayMessage,
+            selectedSegmentIndex = 0,
+            selectedSegmentIndices = listOf(0),
+            isStreaming = false,
+            markdownRenderContext = thoughtMarkdownRenderContext,
+            onMediaClick = onMediaClick,
+            titleOverride = stringResource(R.string.select_text),
+            directSelectableTextContent = displayMessage.text,
+            onDismiss = { showUserTextSelection = false },
+        )
+    }
     if (showCompactDetail) {
         val rawCompactDetailText = liveCompactPreview
             ?.takeIf { compactInProgress }
@@ -404,7 +418,7 @@ internal fun MessageItem(
             onMediaClick = onMediaClick,
             titleOverride = stringResource(com.newoether.agora.R.string.context_compact),
             directMarkdownContent = compactDetailText,
-            emptyStreamingText = CompactStreamingStatusText,
+            emptyStreamingText = stringResource(R.string.context_compact_streaming),
             errorText = detailErrorText,
             handleBackInternally = true,
             onDismiss = { showCompactDetail = false },
@@ -515,8 +529,8 @@ internal fun ContextCompactPill(
             }
             Text(
                 when {
-                    error -> CompactErrorText
-                    presentation == ContextCompactPillPresentation.STOPPED -> CompactStoppedText
+                    error -> stringResource(R.string.context_compact_error)
+                    presentation == ContextCompactPillPresentation.STOPPED -> stringResource(R.string.context_compact_stopped)
                     inProgress -> stringResource(com.newoether.agora.R.string.context_compacting)
                     else -> stringResource(com.newoether.agora.R.string.context_compact)
                 },

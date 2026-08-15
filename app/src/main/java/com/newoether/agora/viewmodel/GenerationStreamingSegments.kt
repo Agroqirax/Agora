@@ -49,6 +49,9 @@ internal class GenerationThoughtTiming(
     }
 }
 
+internal fun statusAfterThoughtPhaseFinished(status: MessageStatus): MessageStatus =
+    if (status == MessageStatus.THINKING) MessageStatus.SENDING else status
+
 internal fun appendMergedSegment(
     target: MutableList<MessageSegment>,
     segment: MessageSegment,

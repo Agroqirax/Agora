@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,6 +65,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.mikepenz.markdown.compose.LocalMarkdownInlineContent
 import com.mikepenz.markdown.model.markdownInlineContent
@@ -89,8 +91,13 @@ internal const val CITATION_CAPSULE_FADE_DURATION_MS = 320
 internal const val CITATION_SOURCES_SUMMARY_MIN_HEIGHT_DP = 36
 internal const val CITATION_SOURCES_SUMMARY_HORIZONTAL_PADDING_DP = 16
 internal const val CITATION_SOURCES_SUMMARY_VERTICAL_PADDING_DP = 8
-internal const val CITATION_INLINE_PRIMARY_MAX_WIDTH_DP = 168
-internal const val CITATION_INLINE_HORIZONTAL_PADDING_DP = 12
+internal const val CITATION_SOURCES_SUMMARY_ICON_SIZE_DP = 18
+internal const val CITATION_SOURCES_SUMMARY_ICON_GAP_DP = 8
+internal const val CITATION_INLINE_PRIMARY_MAX_WIDTH_DP = 84
+internal const val CITATION_INLINE_HORIZONTAL_PADDING_DP = 14
+internal const val CITATION_INLINE_FONT_SIZE_SP = 11
+internal const val CITATION_INLINE_LINE_HEIGHT_SP = 12
+internal const val CITATION_INLINE_PLACEHOLDER_HEIGHT_SP = 22
 internal const val CITATION_INLINE_SUFFIX_GAP_DP = 4
 internal const val CITATION_INLINE_OUTER_SPACER_DP = 2
 internal const val CITATION_SOURCE_ROW_SHAPE_PERCENT = 50
@@ -536,8 +543,8 @@ internal fun CitationInlineContentHost(
         )
     }
     val inlineTextStyle = MaterialTheme.typography.labelSmall.copy(
-        fontSize = 10.sp,
-        lineHeight = 10.sp,
+        fontSize = CITATION_INLINE_FONT_SIZE_SP.sp,
+        lineHeight = CITATION_INLINE_LINE_HEIGHT_SP.sp,
         fontWeight = FontWeight.SemiBold,
     )
     val textMeasurer = rememberTextMeasurer()
@@ -582,7 +589,7 @@ internal fun CitationInlineContentHost(
         marker.inlineId to InlineTextContent(
             placeholder = Placeholder(
                 width = width,
-                height = 20.sp,
+                height = CITATION_INLINE_PLACEHOLDER_HEIGHT_SP.sp,
                 placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
             ),
         ) {
@@ -646,7 +653,7 @@ private fun CitationInlineCapsule(
             .background(citationCapsuleBackgroundColor())
             .clickable(role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = accessibilityLabel }
-            .padding(horizontal = 6.dp),
+            .padding(horizontal = (CITATION_INLINE_HORIZONTAL_PADDING_DP / 2).dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -734,6 +741,13 @@ internal fun CitationSourcesSummaryCapsule(
             ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Icon(
+            painter = painterResource(R.drawable.link_24),
+            contentDescription = null,
+            modifier = Modifier.size(CITATION_SOURCES_SUMMARY_ICON_SIZE_DP.dp),
+            tint = citationCapsuleForegroundColor(),
+        )
+        Spacer(modifier = Modifier.width(CITATION_SOURCES_SUMMARY_ICON_GAP_DP.dp))
         Text(
             text = label,
             color = citationCapsuleForegroundColor(),

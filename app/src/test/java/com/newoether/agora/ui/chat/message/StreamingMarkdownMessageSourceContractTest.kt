@@ -67,11 +67,12 @@ class StreamingMarkdownMessageSourceContractTest {
     fun `Compact detail uses real empty content and ordinary durable error state`() {
         val source = source(locateMainSourceRoot(), "MessageItem.kt")
 
-        assertTrue(source.contains("Context compacting..."))
+        assertTrue(source.contains("R.string.context_compact_streaming"))
         assertTrue(source.contains("directMarkdownContent = compactDetailText"))
         assertTrue(source.contains("errorText = detailErrorText"))
         assertFalse(source.contains("\\u200B"))
-        assertTrue(source.contains("Compact error"))
+        assertTrue(source.contains("R.string.context_compact_error"))
+        assertTrue(source.contains("R.string.context_compact_stopped"))
         assertTrue(source.contains("animateColorAsState("))
         assertTrue(source.contains("Icons.Default.Error"))
         assertTrue(source.contains("MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)"))

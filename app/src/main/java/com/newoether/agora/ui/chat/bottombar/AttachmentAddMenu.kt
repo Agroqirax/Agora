@@ -93,7 +93,7 @@ private fun AttachmentMenuItem(
     DropdownMenuItem(
         text = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, modifier = Modifier.size(18.dp))
+                Icon(icon, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(stringResource(label))
             }

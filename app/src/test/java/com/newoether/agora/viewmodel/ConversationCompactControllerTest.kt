@@ -309,8 +309,9 @@ class ConversationCompactControllerTest {
         )
 
         assertTrue(result is CompactResult.Failed)
-        assertEquals("provider failed", (result as CompactResult.Failed).message)
-        assertFalse(result.message.contains("full generated compact body"))
+        assertEquals("provider failed", (result as CompactResult.Failed).externalDetail)
+        assertEquals(CompactFailureReason.GENERIC, result.reason)
+        assertFalse(result.externalDetail.orEmpty().contains("full generated compact body"))
     }
 
     private suspend fun manualCompactResult(

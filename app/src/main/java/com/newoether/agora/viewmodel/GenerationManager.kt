@@ -431,7 +431,7 @@ class GenerationManager(
                         retryText = null
                         toolOverlay.failIncompleteStreams(completedToolCalls.keys)
                         currentStatus = MessageStatus.ERROR
-                        generationErrorMessage = event.message
+                        generationErrorMessage = localizedGenerationError(context, event.error)
                     }
                     is StreamEvent.HostedToolCallUpdate -> {
                         if (!toolOverlay.hasStream(event.streamKey)) {
@@ -580,6 +580,7 @@ class GenerationManager(
                 requestTrace?.mark("first_semantic_event")
             })
             thoughtTiming.finishCurrent()
+            currentStatus = statusAfterThoughtPhaseFinished(currentStatus)
             if (currentStatus != MessageStatus.ERROR) executeAcceptedToolBatch()
             // Publish the final in-memory snapshot without waiting for another Room round trip.
             // The terminal transaction below persists this exact state after fencing the
@@ -663,6 +664,7 @@ class GenerationManager(
                 )
                 acceptProviderPass(collectProviderRequest(apiToolPath))
                 thoughtTiming.finishCurrent()
+                currentStatus = statusAfterThoughtPhaseFinished(currentStatus)
                 if (currentStatus != MessageStatus.ERROR) executeAcceptedToolBatch()
                 // Publish the round's final UI state immediately. The next loop boundary or the
                 // terminal transaction supplies durability, so blocking here would only duplicate

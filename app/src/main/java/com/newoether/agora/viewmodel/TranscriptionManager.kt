@@ -217,7 +217,7 @@ class TranscriptionManager(
                 segments = transcriptionSegments.toList() + MessageSegment(type = "answer"),
                         ))
                     }
-                    is StreamEvent.Error -> { streamError = event.message }
+                    is StreamEvent.Error -> { streamError = localizedGenerationError(context, event.error) }
                     else -> {}
                 }
             }

@@ -300,7 +300,7 @@ internal class MessageGenerationController(
 
     suspend fun compactManual(request: CompactRequest): CompactResult {
         val conversationId = currentConversationId.value
-            ?: return CompactResult.Failed("Open a conversation first")
+            ?: return CompactResult.Failed(CompactFailureReason.OPEN_CONVERSATION)
         return compactController.manual(
             conversationId = conversationId,
             request = request,
@@ -445,7 +445,7 @@ internal class MessageGenerationController(
                     )
                 ) {
                     is CompactResult.Failed -> {
-                        onSnackbar(compact.message)
+                        onSnackbar(compactFailureMessage(appContext, compact))
                         return null
                     }
                     is CompactResult.Stopped -> return null

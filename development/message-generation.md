@@ -215,27 +215,36 @@ SENDING/THINKING/terminal/error transitions. UI specialization cannot redefine g
 context contracts.
 
 When the Compact detail Bottom Sheet is open and the ordinary durable message is
-SENDING/answering with no real Markdown output, it shows exactly `Context compacting...` in the
-Material primary color. The placeholder enters and leaves with fade animations. Its shared
+SENDING/answering with no real Markdown output, it shows the localized equivalent of
+`Context compacting...` in the Material primary color. The placeholder enters and leaves with fade animations. Its shared
 empty-stream rendering receives an 8 dp internal top inset so the status line does not crowd the
 Bottom Sheet divider. As soon as real output exists, the placeholder fades out and the body renders
 normally.
 
 A terminal Compact error remains visible in both locations:
 
-- the detail Bottom Sheet places the shared ordinary generation error bar beside the Markdown body;
-- the capsule animates to the same theme-derived error palette as the shared error bar without
-  changing its bounds and shows an error icon plus exactly `Compact error`. Its container uses the
-  error bar's `errorContainer` alpha, its icon uses `error`, and its text uses the error bar's
-  alpha-adjusted `error`; saturated hard-coded red or a different error token is forbidden.
+- the detail Bottom Sheet places the shared neutral-gray generation error bar beside the Markdown
+  body;
+- the capsule retains its existing theme-derived error palette independently of the neutral terminal
+  bar, without changing its bounds, and shows an error icon plus the localized equivalent of
+  `Compact error`. Its container uses `errorContainer`, its icon uses `error`, and its text uses alpha-adjusted
+  `error`; saturated hard-coded red or a different error token is forbidden.
 
 A stopped Compact is a non-error terminal presentation. Its capsule keeps the same stable bounds,
-shows a stopped icon plus exactly `Compact stopped`, and emits no Snackbar. A failed Compact may
-emit only the persisted ordinary generation error segment; generated answer/summary text is never
-an error channel. Missing error detail uses a fixed short fallback.
+shows a stopped icon plus the localized equivalent of `Compact stopped`, and emits no Snackbar. A
+failed Compact may emit only the persisted ordinary generation error segment; generated answer/summary text is never
+an error channel. Missing error detail uses a localized short fallback.
 
-Both presentations derive from the ordinary durable message status/error fields. They do not own a
-Compact state machine or infer failure from missing text.
+All app-owned Compact settings, delete/recompact actions, boundary messages, streaming/status chrome,
+and known preflight/launch failure reasons must resolve through Android resources in the current
+locale. Domain owners carry a semantic `CompactFailureReason`, an optional nonblank external detail,
+and the affected message identity; they do not manufacture user-facing English. One narrow
+presentation resolver is shared by the manual and automatic UI consumers. Nonblank Provider or
+persisted error detail remains verbatim diagnostic content and is never translated. Internal
+invariant/debug exceptions are not user-visible resources.
+
+Both terminal presentations derive from the ordinary durable message status/error fields. They do
+not own a Compact state machine or infer failure from missing text.
 
 ### 8.7 Shared streaming Markdown UI
 
@@ -258,10 +267,103 @@ host so dragging handles never repositions the conversation. Active streaming co
 non-selectable; once that same renderer reaches terminal state, selection is enabled without
 switching Markdown implementations or disabling virtualization.
 
-The red generation error bar is not Markdown syntax or renderer state. It is one stateless shared UI
-component, not a domain/state object. The ordinary answer body and detail Bottom Sheets render this
-same component beside the shared Markdown implementation, driven by the existing error value. It
-must not subscribe to, translate, or own generation lifecycle state.
+Generation terminal presentation is not Markdown syntax or renderer state. One stateless shared text
+component renders the ordinary answer and detail-sheet error beside the shared Markdown
+implementation. It does not subscribe to or own generation lifecycle state.
+
+Typed `GenerationError` remains the domain boundary. Before chat generation or transcription
+persists a display error, one Android-resource-backed presenter resolves app-owned categories and
+known transport reasons in the current locale. Authentication, rate limit, server/network wrappers,
+SSE parse, incomplete stream, output truncation, request validation, cancellation, timeout,
+unexpected-error fallback, and tool/transcription/embedding wrappers are resource owned in every
+supported locale. Exact common transport details such as connection closed/refused/reset, unknown
+host, and TLS failure are matched case-insensitively and localized. Nonblank Provider/API/server/OS
+diagnostic detail remains verbatim inside the localized wrapper unless it is plain prose whose first
+lowercase Unicode letter can be title-cased safely; codes, URLs, JSON, and identifiers are not
+rewritten. A narrow render-time compatibility normalizer applies the same known-phrase and safe
+sentence-case rules to already-persisted strings without mutating Room data.
+
+Ordinary assistant messages render no general-purpose status row. Sending, Thinking, answering,
+terminal success/token usage, stopped, and failed labels must not reserve or render that legacy row.
+Generation ERROR and STOPPED render text only: no Surface/background, rounded outline, Info icon,
+icon gap, or inner container padding. Both use the exact Retry label tokens, `ChatType.body` and
+`onSurfaceVariant` at 0.55 alpha, but neither uses Retry's grapheme entrance or active white dot.
+ERROR remains full-line, multiline, and selectable with its nonblank detail; STOPPED remains a
+localized content-width label. Their existing contextual outer vertical separation remains, and
+their durable ERROR versus STOPPED semantics stay distinct. Compact capsule error/stopped chrome is
+independent and unchanged.
+
+The existing answer-tail breathing dot remains owned by the message list. The same shared dot visual
+fills only the pre-output gap: while ordinary generation is active and the message has no answer text
+and no visible Thought, Tool, or Transcription segment, it renders alone. When the first visible
+Thought, Tool, or Transcription segment changes that pre-output mode to hidden, the activity host
+retains the last non-hidden presentation through an exact 320 ms opacity exit instead of destroying
+it in the same frame. Retaining the last mode also prevents a terminating Retry from flashing back to
+the ordinary dot. A retry reserves the final
+layout footprint for the localized `Retrying n/m...` label and shared dot, then fades the label in by
+Unicode grapheme at 27 ms per grapheme, bounded to 225-600 ms, with a fast-start,
+slow-finish `LinearOutSlowInEasing` curve. The same breathing dot translates continuously along the
+measured text-caret position and settles 8 dp after the full label; it is not replaced by a second
+dot. The entrance plays only once for one fresh retry-indicator composition. Attempt/label updates
+inside that retry episode snap immediately to the complete new label and final dot position without
+replaying; leaving and later re-entering retry creates a fresh episode that may animate once.
+Reduced Motion always shows the complete label and final dot position immediately. The label remains
+ordinary Markdown body size and semi-transparent gray, and retry presentation never owns scrolling
+or attachment state.
+
+The compact Thinking card is content-width and left-aligned while collapsed, and fills the available
+message width while expanded. It must not use card-level `animateContentSize`: an explicit 400 ms
+width-only transition matches the existing 400 ms vertical expansion/collapse and animates between
+the measured localized header width plus a 12 dp anti-ellipsis allowance and parent maximum width
+with a fast-start, slow-finish `LinearOutSlowInEasing` curve. The collapsed target remains capped by
+the available parent width. The animated width belongs only to the card shell: leading header content
+and expanded content retain a stable target layout width, remain anchored at `Alignment.TopStart`,
+and are clipped/revealed by the shell instead of being squeezed, reflowed, or centered at intermediate
+widths. Reduced Motion snaps spatial width.
+
+The header uses an 18 dp corner radius, 12 dp start by 10 dp vertical padding, an 18 dp icon/loading
+slot, an 8 dp icon-title gap, and the accepted local 13 sp / 22 sp SemiBold title. The title row
+reserves one 8 dp gap plus one 18 dp trailing disclosure slot. The same single 18 dp
+`KeyboardArrowDown` is a Surface-local overlay, outside the unbounded/clipped content Row, so its
+layout box tracks the visible animated shell's end edge with an exact 8 dp end inset at every width.
+No second disclosure exists. That single vector rotates to -90 degrees for detail-sheet navigation,
+0 degrees while inline-collapsed, and 180 degrees while inline-expanded; spatial motion animates the
+rotation and Reduced Motion snaps it. If any Thought, Tool, or Transcription segment in the card is active, the header icon is the
+shared motion-aware 18 dp loading indicator with an exact 4 dp stroke. Loading, brain, tool, and image
+icon changes all remain targets of the existing Crossfade; no active/static icon change is abrupt.
+During an active Thought, only an absent/default `Thinking...` title becomes a once-per-second
+`Thinking for Ns...` label based on the latest live thought-duration snapshot. Provider titles,
+Tool/Transcription titles, and terminal duration summaries remain semantic. At every Provider-pass
+thought boundary, the runtime finishes authoritative thought timing and changes the in-memory live
+status from THINKING to SENDING before publishing that finished-duration snapshot. The UI ticker and
+loading state therefore stop at the same boundary as persisted duration; later terminal settlement
+must not make the displayed duration decrease.
+
+Answer Markdown and Thinking-segment Markdown use one presentation multiplier of exactly 1.1 for
+line height only. It applies to paragraph/body, ordered and unordered lists, tables, H1-H6,
+block/inline code, and both streaming plain-text fallbacks. Answer/Thinking Markdown font sizes and
+their source `ChatType` tokens remain unchanged; the multiplier belongs to the chat Markdown asset owner.
+
+User-message body text uses the dedicated `ChatType.userBody` token at 15 sp with its existing 22 sp
+line height; branch navigation and dropdown-menu typography are unchanged.
+
+A non-editing user bubble owns its action dropdown through long press. The separate action row below
+the bubble is absent; the branch selector remains independently visible. The existing Material menu
+style contains Copy, Edit, Select Text, Info, and Delete in that order and retains current availability
+rules. Select Text reuses the existing custom Thinking detail-sheet shell with title `Select Text` and
+renders only the raw user message text in the shared no-auto-scroll native selection host. Its raw
+content branch uses 12 dp top, 24 dp horizontal, and 32 dp bottom padding so text does not crowd the
+header divider. It does not include attachments.
+
+Thinking and Select Text share one reusable `SmoothBottomSheet` Compose shell. A small stable state
+type plus `rememberSmoothBottomSheetState` owns Hidden/Partial/Expanded values; the shell owns the
+edge-to-edge Dialog/Surface, 0/0.45/0.94 anchors, 0.9 damping and 350 stiffness snap spring,
+interruption, native dim curve, scrim/back dismissal, draggable handle/header, Reduced Motion snap,
+and nested-scroll collapse driven by a caller-provided content-at-top predicate. `SegmentDetailSheet`
+only owns selected-segment navigation, titles/back action, scroll/LazyList state, Markdown/tool/media,
+footer/error, and Select Text content. Extraction preserves the existing geometry, thresholds,
+motion, header/divider, and rendering. Material 3 Sources, image, settings, and composer sheets remain
+owned by `MotionAwareModalBottomSheet` and are not migrated.
 
 ### 8.8 Empty output and automatic handoff
 

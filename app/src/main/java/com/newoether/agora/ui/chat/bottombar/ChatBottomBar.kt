@@ -591,7 +591,7 @@ fun ChatBottomBar(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(18.dp))
+                                    Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column {
                                         Text(stringResource(R.string.thinking))
@@ -625,7 +625,7 @@ fun ChatBottomBar(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(stringResource(R.string.code_execution))
                                         Spacer(modifier = Modifier.width(10.dp))
@@ -648,7 +648,7 @@ fun ChatBottomBar(
                                             painter = androidx.compose.ui.res.painterResource(R.drawable.provider_google),
                                             contentDescription = null,
                                             colorFilter = ColorFilter.tint(Color.White),
-                                            modifier = Modifier.size(18.dp),
+                                            modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp),
                                         )
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(stringResource(R.string.google_search))
@@ -673,7 +673,7 @@ fun ChatBottomBar(
                                         Icon(
                                             Icons.Default.Speed,
                                             contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
+                                            modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp),
                                         )
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column {
@@ -713,7 +713,7 @@ fun ChatBottomBar(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Language, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(stringResource(R.string.web_search))
                                     }
@@ -732,7 +732,7 @@ fun ChatBottomBar(
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(stringResource(R.string.shell_title))
                                     }
@@ -750,7 +750,7 @@ fun ChatBottomBar(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Compress, null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Compress, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(stringResource(R.string.context_compact))
                                 }
@@ -761,7 +761,7 @@ fun ChatBottomBar(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Tune, null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Tune, null, modifier = Modifier.size(CHAT_DROPDOWN_MENU_ICON_SIZE_DP.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(stringResource(R.string.advanced_settings))
                                 }
