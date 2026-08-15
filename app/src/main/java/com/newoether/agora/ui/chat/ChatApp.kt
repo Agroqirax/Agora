@@ -176,7 +176,7 @@ fun ChatApp(
     val thinkingBudgetTokens = convOverride?.thinkingBudgetTokens ?: globalThinkingBudgetTokens
     val selectedProviderName = viewModel.getProviderForModel(selectedModel)
     val openAiServiceTierState = openAiConversationServiceTierState(
-        viewModel, convOverride, selectedProviderName, customProviders,
+        viewModel, convOverride, selectedProviderName, openAiResponsesApiEnabled, customProviders,
     )
     val openAiWebSearchAvailable = resolveOpenAiNativeSearchAvailability(
         selectedProviderName, openAiResponsesApiEnabled, customProviders,

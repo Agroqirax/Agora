@@ -522,11 +522,12 @@ class BaseOpenAiProviderTerminationTest {
             socket.writeSse("[DONE]")
         },
     ) { provider, config, server ->
-        val events = collect(provider, config)
+        val events = collect(provider, config.copy(openAiServiceTier = "fast"))
         assertEquals("POST /v1/chat/completions HTTP/1.1", server.requests.single().requestLine)
         val body = WIRE_JSON.parseToJsonElement(server.requests.single().body).jsonObject
         assertTrue(body.containsKey("messages"))
         assertFalse(body.containsKey("input"))
+        assertFalse(body.containsKey("service_tier"))
         assertTrue(events.none { it is StreamEvent.Error })
     }
 

@@ -28,7 +28,7 @@ class OpenAiNativeSearchWiringTest {
         }
         listOf(
             "responsesApiEnabled = isResponsesApiEnabledForProvider(",
-            "openAiWebSearchEnabled = effectiveSettings.openAiWebSearchEnabled == true",
+            "effectiveSettings.openAiWebSearchEnabled == true && responsesApiEnabled",
         ).forEach { wiring ->
             assertTrue("generation request must wire $wiring", wiring in requestBuilder)
         }

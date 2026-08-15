@@ -18,6 +18,7 @@ class OpenAiConversationServiceTierTest {
             globalTier = OpenAiServiceTiers.FLEX,
             conversationOverride = ConversationSettings(),
             providerName = Constants.PROVIDER_OPENAI,
+            builtInOpenAiResponsesEnabled = true,
             customProviders = emptyList(),
         )
         assertTrue(inherited.available)
@@ -32,6 +33,7 @@ class OpenAiConversationServiceTierTest {
                 openAiServiceTier = OpenAiServiceTiers.FAST,
             ),
             providerName = Constants.PROVIDER_OPENAI,
+            builtInOpenAiResponsesEnabled = true,
             customProviders = emptyList(),
         )
         assertFalse(overridden.enabled)
@@ -44,6 +46,7 @@ class OpenAiConversationServiceTierTest {
             CustomProviderConfig(
                 name = "OpenAI relay",
                 protocol = CustomEndpointProtocol.OPENAI,
+                responsesApiEnabled = true,
             ),
             CustomProviderConfig(
                 name = "Anthropic relay",
@@ -57,6 +60,7 @@ class OpenAiConversationServiceTierTest {
                 OpenAiServiceTiers.AUTO,
                 null,
                 "OpenAI relay",
+                false,
                 customProviders,
             ).available,
         )
@@ -66,7 +70,38 @@ class OpenAiConversationServiceTierTest {
                 OpenAiServiceTiers.AUTO,
                 null,
                 "Anthropic relay",
+                false,
                 customProviders,
+            ).available,
+        )
+    }
+
+    @Test
+    fun availabilityRequiresResponsesForBuiltInAndCustomProviders() {
+        assertFalse(
+            resolveOpenAiConversationServiceTier(
+                globalEnabled = true,
+                globalTier = OpenAiServiceTiers.FAST,
+                conversationOverride = null,
+                providerName = Constants.PROVIDER_OPENAI,
+                builtInOpenAiResponsesEnabled = false,
+                customProviders = emptyList(),
+            ).available,
+        )
+        assertFalse(
+            resolveOpenAiConversationServiceTier(
+                globalEnabled = true,
+                globalTier = OpenAiServiceTiers.FAST,
+                conversationOverride = null,
+                providerName = "Relay without Responses",
+                builtInOpenAiResponsesEnabled = true,
+                customProviders = listOf(
+                    CustomProviderConfig(
+                        name = "Relay without Responses",
+                        protocol = CustomEndpointProtocol.OPENAI,
+                        responsesApiEnabled = false,
+                    ),
+                ),
             ).available,
         )
     }

@@ -7,7 +7,6 @@ import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.PredefinedVariables
 import com.newoether.agora.data.SystemPromptEntry
 import com.newoether.agora.data.providerDisplayName
-import com.newoether.agora.data.isOpenAiProtocolProvider
 import com.newoether.agora.data.isResponsesApiEnabledForProvider
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.repository.ConversationRepository
@@ -290,6 +289,11 @@ class GenerationRequestBuilder(
     ): Pair<GenerationConfig, GenerationContext> {
         val imageGenModel = settings.imageGenModel.value
         val transcriptionModel = settings.imageTranscriptionModel.value
+        val responsesApiEnabled = isResponsesApiEnabledForProvider(
+            providerName = providerName,
+            builtInOpenAiEnabled = settings.openAiResponsesApiEnabled.value,
+            customProviders = settings.customProviders.value,
+        )
         val config = GenerationConfig(
             providerName = providerName,
             modelId = ModelId.parse(providerRegistry.canonicalModelId(modelId)).modelName,
@@ -305,21 +309,13 @@ class GenerationRequestBuilder(
             thinkingBudgetEnabled = effectiveSettings.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
             thinkingBudgetTokens = effectiveSettings.thinkingBudgetTokens ?: settings.thinkingBudgetTokens.value,
             openAiServiceTier = OpenAiServiceTiers.requestValue(
-                enabled = effectiveSettings.openAiServiceTierEnabled == true &&
-                    isOpenAiProtocolProvider(providerName, settings.customProviders.value),
+                enabled = effectiveSettings.openAiServiceTierEnabled == true,
                 value = effectiveSettings.openAiServiceTier,
+                responsesApiEnabled = responsesApiEnabled,
             ),
-            responsesApiEnabled = isResponsesApiEnabledForProvider(
-                providerName = providerName,
-                builtInOpenAiEnabled = settings.openAiResponsesApiEnabled.value,
-                customProviders = settings.customProviders.value,
-            ),
-            openAiWebSearchEnabled = effectiveSettings.openAiWebSearchEnabled == true &&
-                isResponsesApiEnabledForProvider(
-                    providerName = providerName,
-                    builtInOpenAiEnabled = settings.openAiResponsesApiEnabled.value,
-                    customProviders = settings.customProviders.value,
-                ),
+            responsesApiEnabled = responsesApiEnabled,
+            openAiWebSearchEnabled =
+                effectiveSettings.openAiWebSearchEnabled == true && responsesApiEnabled,
             baseUrl = providerRegistry.getEffectiveBaseUrl(providerName),
             userPrepend = resolvedUserPrepend,
             userPostpend = resolvedUserPostpend,

@@ -168,7 +168,6 @@ abstract class BaseOpenAiProvider : LlmProvider {
                     stream = true,
                     streamOptions = OpenAiStreamOptions(includeUsage = true),
                     tools = config.tools,
-                    serviceTier = config.openAiServiceTier,
                     temperature = config.temperature,
                     maxTokens = config.maxTokens,
                     topP = config.topP,

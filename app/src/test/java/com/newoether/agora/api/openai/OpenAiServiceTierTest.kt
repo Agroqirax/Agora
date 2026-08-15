@@ -27,6 +27,7 @@ class OpenAiServiceTierTest {
             serviceTier = OpenAiServiceTiers.requestValue(
                 enabled = true,
                 value = OpenAiServiceTiers.FAST,
+                responsesApiEnabled = true,
             ),
         )
 
@@ -41,7 +42,20 @@ class OpenAiServiceTierTest {
     fun disabledTierDoesNotLeakIntoTheCompatibleRequest() {
         val baseRequest = request()
 
-        assertNull(OpenAiServiceTiers.requestValue(false, OpenAiServiceTiers.FAST))
+        assertNull(
+            OpenAiServiceTiers.requestValue(
+                enabled = false,
+                value = OpenAiServiceTiers.FAST,
+                responsesApiEnabled = true,
+            ),
+        )
+        assertNull(
+            OpenAiServiceTiers.requestValue(
+                enabled = true,
+                value = OpenAiServiceTiers.FAST,
+                responsesApiEnabled = false,
+            ),
+        )
         assertNull(baseRequest.serviceTier)
         assertFalse(
             wireJson.encodeToString(baseRequest)
