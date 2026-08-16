@@ -10,9 +10,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Polyline
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Widgets
@@ -87,17 +87,6 @@ fun SettingsChatWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                     add {
                         SettingsItem(
-                            headlineContent = { Text(stringResource(R.string.html_chat_widgets_theme_enable)) },
-                            supportingContent = { Text(stringResource(R.string.html_chat_widgets_theme_enable_desc)) },
-                            leadingContent = { Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary) },
-                            trailingContent = {
-                                Switch(checked = htmlThemeEnabled, onCheckedChange = { viewModel.settings.setHtmlChatWidgetsThemeEnabled(it) })
-                            },
-                            modifier = Modifier.clickable { viewModel.settings.setHtmlChatWidgetsThemeEnabled(!htmlThemeEnabled) }
-                        )
-                    }
-                    add {
-                        SettingsItem(
                             headlineContent = { Text(stringResource(R.string.html_chat_widgets_js_enable)) },
                             supportingContent = { Text(stringResource(R.string.html_chat_widgets_js_enable_desc)) },
                             leadingContent = { Icon(Icons.Default.Code, null, tint = MaterialTheme.colorScheme.primary) },
@@ -105,6 +94,17 @@ fun SettingsChatWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Switch(checked = htmlJsEnabled, onCheckedChange = { viewModel.settings.setHtmlChatWidgetsJsEnabled(it) })
                             },
                             modifier = Modifier.clickable { viewModel.settings.setHtmlChatWidgetsJsEnabled(!htmlJsEnabled) }
+                        )
+                    }
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.html_chat_widgets_theme_enable)) },
+                            supportingContent = { Text(stringResource(R.string.html_chat_widgets_theme_enable_desc)) },
+                            leadingContent = { Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Switch(checked = htmlThemeEnabled, onCheckedChange = { viewModel.settings.setHtmlChatWidgetsThemeEnabled(it) })
+                            },
+                            modifier = Modifier.clickable { viewModel.settings.setHtmlChatWidgetsThemeEnabled(!htmlThemeEnabled) }
                         )
                     }
                 }
@@ -115,7 +115,7 @@ fun SettingsChatWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     SettingsItem(
                         headlineContent = { Text(stringResource(R.string.svg_chat_widgets_enable)) },
                         supportingContent = { Text(stringResource(R.string.svg_chat_widgets_enable_desc)) },
-                        leadingContent = { Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.primary) },
+                        leadingContent = { Icon(Icons.Default.Polyline, null, tint = MaterialTheme.colorScheme.primary) },
                         trailingContent = {
                             Switch(checked = svgEnabled, onCheckedChange = { viewModel.settings.setSvgChatWidgetsEnabled(it) })
                         },
